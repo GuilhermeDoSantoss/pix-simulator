@@ -1,0 +1,94 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: pix-simulator
+
+  # ========== BANCO DE DADOS ==========
+  # Configurações de conexão com o PostgreSQL rodando no Docker
+  datasource:
+    url: jdbc:postgresql://localhost:5432/pixdb
+    username: pix_user
+    password: pix_pass
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      # ddl-auto: update cria/atualiza as tabelas automaticamente ao subir
+      # Em produção usar 'validate' ou migrations com Flyway/Liquibase
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  # ========== REDIS ==========
+  # Redis armazena as chaves de idempotência dos PIX
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      # timeout da conexão em milissegundos
+      timeout: 2000ms
+
+  # ========== KAFKA ==========
+  # Kafka para eventos de transação e alertas de anomalia
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      # Serialização das mensagens em JSON
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      # Garante que a mensagem foi recebida por todos os brokers antes de confirmar
+      acks: all
+      # Retenta até 3 vezes em caso de falha transitória
+      retries: 3
+    consumer:
+      group-id: pix-anomaly-detector
+      # earliest: lê desde o início do tópico quando o grupo não tem offset salvo
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        # Informa ao deserializador quais pacotes são confiáveis para desserializar
+        spring.json.trusted.packages: "com.pixsimulator.*"
+
+# ========== JWT ==========
+# Configurações do token JWT
+app:
+  jwt:
+    # Segredo usado para assinar o token - em produção use uma variável de ambiente
+    secret: "pix-simulator-secret-key-must-be-at-least-256-bits-long-for-hs256"
+    # Tempo de expiração em milissegundos: 86400000 = 24 horas
+    expiration: 86400000
+
+  # ========== IDEMPOTÊNCIA ==========
+  idempotency:
+    # TTL das chaves no Redis em horas - após esse tempo a chave expira
+    ttl-hours: 24
+
+  # ========== DETECTOR DE ANOMALIA ==========
+  anomaly:
+    # Multiplica o desvio padrão para definir o limite - valor acima é anomalia
+    # Ex: média R$50 + (3 x desvio) = threshold. PIX acima disso gera alerta
+    threshold-multiplier: 3.0
+    # Mínimo de transações históricas necessárias para calcular desvio padrão
+    min-history-count: 5
+
+# ========== SWAGGER ==========
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    # Agrupa os endpoints por tags definidas nos controllers
+    tags-sorter: alpha
+
+# ========== KAFKA TOPICS ==========
+# Nomes dos tópicos usados na aplicação
+kafka:
+  topics:
+    pix-events: pix.events      # Publicado quando um PIX é confirmado
+    pix-alerts: pix.alerts      # Publicado quando uma anomalia é detectada
