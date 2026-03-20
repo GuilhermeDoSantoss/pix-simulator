@@ -1,4 +1,4 @@
-package account;
+package com.pix_simulator.Pix.Simulator.account;
 
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
