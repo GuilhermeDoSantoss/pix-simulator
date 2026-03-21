@@ -1,6 +1,5 @@
 package com.pix_simulator.Pix.Simulator.config;
 
-
 import com.pix_simulator.Pix.Simulator.auth.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -62,12 +61,17 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Endpoints públicos - não precisam de token
                         .requestMatchers(
-                                "/api/auth/**",          // Login e registro
+                                "/api/auth/**",           // Login e registro
                                 "/api/accounts/register", // Cadastro de conta
                                 "/swagger-ui/**",         // Documentação Swagger
                                 "/swagger-ui.html",
                                 "/api-docs/**",
-                                "/v3/api-docs/**"
+                                "/v3/api-docs/**",
+                                "/",                      // Frontend: index.html na raiz
+                                "/index.html",
+                                "/*.css",                 // Arquivos estáticos do frontend
+                                "/*.js",
+                                "/favicon.ico"
                         ).permitAll()
                         // Todos os outros endpoints exigem autenticação (token JWT válido)
                         .anyRequest().authenticated()
