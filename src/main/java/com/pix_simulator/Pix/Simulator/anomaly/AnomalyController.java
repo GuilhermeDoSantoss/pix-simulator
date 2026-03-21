@@ -2,6 +2,7 @@ package com.pix_simulator.Pix.Simulator.anomaly;
 
 
 import com.pix_simulator.Pix.Simulator.auth.AccountPrincipal;
+import com.pix_simulator.Pix.Simulator.shared.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
