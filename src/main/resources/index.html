@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PIX Simulator</title>
+    <style>
+        /* =====================================================
+           RESET E VARIÁVEIS
+           ===================================================== */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+          --bg:        #0f1117;
+          --bg2:       #1a1d27;
+          --bg3:       #242838;
+          --border:    #2e3347;
+          --border2:   #3d4460;
+          --text:      #e2e4ed;
+          --text2:     #8b90a7;
+          --text3:     #5a5f74;
+          --primary:   #6366f1;
+          --primary-d: #4f46e5;
+          --primary-l: #818cf8;
+          --success:   #10b981;
+          --s-bg:      #0d2e22;
+          --danger:    #ef4444;
+          --d-bg:      #2d1515;
+          --warning:   #f59e0b;
+          --w-bg:      #2d2210;
+          --pix:       #00c46a;
+          --pix-d:     #009e56;
+          --r:         12px;
+          --r-sm:      8px;
+        }
+
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          background: var(--bg);
+          color: var(--text);
+          min-height: 100vh;
+          font-size: 14px;
+          line-height: 1.5;
+        }
+
+        /* =====================================================
+           UTILITÁRIOS
+           ===================================================== */
+        .hidden  { display: none !important; }
+        .screen  { width: 100%; min-height: 100vh; }
+
+        /* =====================================================
+           TELA AUTH
+           ===================================================== */
+        #auth-screen {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 24px;
+          min-height: 100vh;
+        }
+
+        .auth-box {
+          width: 100%;
+          max-width: 420px;
+          background: var(--bg2);
+          border: 1px solid var(--border);
+          border-radius: var(--r);
+          padding: 40px;
+        }
+
+        /* Logo */
+        .logo { text-align: center; margin-bottom: 32px; }
+        .logo-icon {
+          width: 60px; height: 60px;
+          background: linear-gradient(135deg, var(--primary), var(--pix));
+          border-radius: 14px;
+          display: inline-flex; align-items: center; justify-content: center;
+          font-size: 26px; font-weight: 700; color: #fff;
+          margin-bottom: 12px;
+        }
+        .logo h1 { font-size: 22px; font-weight: 700; }
+        .logo p  { color: var(--text2); font-size: 13px; margin-top: 4px; }
+
+        /* Abas auth */
+        .tabs {
+          display: flex;
+          background: var(--bg3);
+          border-radius: var(--r-sm);
+          padding: 4px; gap: 4px;
+          margin-bottom: 24px;
+        }
+        .tab {
+          flex: 1; padding: 8px;
+          border: none; border-radius: 6px;
+          background: transparent; color: var(--text2);
+          cursor: pointer; font-size: 14px; font-weight: 500;
+          transition: all .15s;
+        }
+        .tab.active { background: var(--bg2); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+
+        /* Formulários */
+        .form-group { margin-bottom: 14px; }
+        .form-group label {
+          display: block; color: var(--text2); font-size: 11px;
+          margin-bottom: 5px; font-weight: 600;
+          text-transform: uppercase; letter-spacing: .4px;
+        }
+        input[type="text"],
+        input[type="password"],
+        input[type="number"] {
+          width: 100%; padding: 10px 12px;
+          background: var(--bg3); border: 1px solid var(--border);
+          border-radius: var(--r-sm); color: var(--text);
+          font-size: 14px; outline: none; transition: border-color .15s;
+        }
+        input:focus { border-color: var(--primary); }
+        input::placeholder { color: var(--text3); }
+
+        /* Botões gerais */
+        .btn {
+          width: 100%; padding: 11px; border: none;
+          border-radius: var(--r-sm); font-size: 14px;
+          font-weight: 600; cursor: pointer; transition: all .15s;
+          margin-top: 6px;
+        }
+        .btn:disabled { opacity: .5; cursor: not-allowed; }
+        .btn-primary  { background: var(--primary); color: #fff; }
+        .btn-primary:not(:disabled):hover { background: var(--primary-d); }
+        .btn-secondary { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
+        .btn-secondary:not(:disabled):hover { border-color: var(--border2); }
+        .btn-pix { background: var(--pix); color: #000; font-size: 15px; padding: 13px; }
+        .btn-pix:not(:disabled):hover { background: var(--pix-d); }
+        .btn-retry {
+          background: var(--bg3); color: var(--warning);
+          border: 1px solid var(--warning); font-size: 13px;
+          padding: 10px;
+        }
+        .btn-retry:not(:disabled):hover { background: var(--w-bg); }
+        .btn-ghost {
+          background: none; border: 1px solid var(--border);
+          border-radius: 6px; color: var(--text2);
+          padding: 6px 12px; cursor: pointer; font-size: 13px;
+          transition: all .15s;
+        }
+        .btn-ghost:hover { border-color: var(--border2); color: var(--text); }
+        .btn-icon {
+          background: none; border: none; color: var(--text2);
+          cursor: pointer; font-size: 16px; padding: 4px 8px;
+          border-radius: 4px; line-height: 1;
+        }
+        .btn-icon:hover { background: var(--bg3); }
+        .btn-link {
+          background: none; border: none; color: var(--primary-l);
+          cursor: pointer; font-size: 12px; text-decoration: underline;
+        }
+
+        /* Mensagem auth */
+        .auth-msg {
+          padding: 11px 13px; border-radius: var(--r-sm);
+          font-size: 13px; margin-top: 14px;
+        }
+        .auth-msg.success { background: var(--s-bg); color: var(--success); border: 1px solid rgba(16,185,129,.3); }
+        .auth-msg.error   { background: var(--d-bg); color: var(--danger);  border: 1px solid rgba(239,68,68,.3); }
+
+        /* =====================================================
+           TELA PRINCIPAL
+           ===================================================== */
+        #main-screen { display: none; flex-direction: column; }
+        #main-screen.active { display: flex; }
+
+        /* Navbar */
+        .navbar {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 13px 24px;
+          background: var(--bg2); border-bottom: 1px solid var(--border);
+          position: sticky; top: 0; z-index: 100;
+        }
+        .navbar-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; }
+        .logo-sm {
+          width: 28px; height: 28px;
+          background: linear-gradient(135deg, var(--primary), var(--pix));
+          border-radius: 6px; display: inline-flex;
+          align-items: center; justify-content: center;
+          font-size: 12px; font-weight: 700; color: #fff;
+        }
+        .navbar-user { display: flex; align-items: center; gap: 12px; color: var(--text2); font-size: 13px; }
+
+        /* Layout 2 colunas */
+        .content {
+          display: grid;
+          grid-template-columns: 380px 1fr;
+          gap: 20px; padding: 20px;
+          max-width: 1180px; margin: 0 auto;
+          width: 100%;
+        }
+
+        /* Cards */
+        .card {
+          background: var(--bg2); border: 1px solid var(--border);
+          border-radius: var(--r); padding: 18px;
+          margin-bottom: 14px;
+        }
+        .card:last-child { margin-bottom: 0; }
+        .card-title {
+          font-size: 13px; font-weight: 600;
+          margin-bottom: 14px; display: flex;
+          align-items: center; gap: 8px;
+        }
+        .badge-test {
+          background: var(--bg3); color: var(--text3);
+          border: 1px solid var(--border); border-radius: 4px;
+          padding: 1px 6px; font-size: 10px; font-weight: 500;
+        }
+
+        /* Card conta */
+        .account-card {
+          background: linear-gradient(135deg, #181c38 0%, #18283a 100%);
+          border-color: #2e3a5c;
+        }
+        .account-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px; }
+        .account-name  { font-size: 17px; font-weight: 700; }
+        .account-key   { font-size: 12px; color: var(--text2); margin-top: 3px; }
+        .balance-label { font-size: 10px; color: var(--text2); text-transform: uppercase; letter-spacing: .5px; }
+        .balance-val   { font-size: 30px; font-weight: 700; color: var(--pix); margin-top: 2px; }
+
+        /* Inline form depósito */
+        .inline-form { display: flex; gap: 8px; }
+        .inline-form input { flex: 1; }
+        .inline-form .btn { width: auto; margin-top: 0; white-space: nowrap; padding: 10px 14px; }
+
+        /* Bloco idempotência */
+        .idp-box {
+          background: var(--bg3); border: 1px solid var(--border);
+          border-left: 3px solid var(--primary);
+          border-radius: var(--r-sm); padding: 11px; margin-bottom: 14px;
+        }
+        .idp-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        .idp-label  { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--primary-l); }
+        .idp-key    { font-family: monospace; font-size: 10px; color: var(--text2); word-break: break-all; margin-bottom: 3px; }
+        .idp-hint   { font-size: 11px; color: var(--text3); }
+
+        /* Resultado PIX */
+        .pix-result {
+          margin-top: 14px; padding: 13px;
+          border-radius: var(--r-sm); font-size: 13px;
+        }
+        .pix-result.ok       { background: var(--s-bg); border: 1px solid rgba(16,185,129,.3); }
+        .pix-result.idp      { background: var(--w-bg); border: 1px solid rgba(245,158,11,.3); }
+        .pix-result.fail     { background: var(--d-bg); border: 1px solid rgba(239,68,68,.3); }
+        .res-title  { font-weight: 600; font-size: 14px; margin-bottom: 10px; }
+        .res-row    { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
+        .res-row:last-child { border-bottom: none; }
+        .res-lbl    { color: var(--text2); }
+        .res-val    { font-weight: 600; }
+        .res-val.ok  { color: var(--success); }
+        .res-val.w   { color: var(--warning); }
+        .res-note   { font-size: 11px; color: var(--text2); margin-bottom: 9px; line-height: 1.5; }
+
+        /* =====================================================
+           PAINEL DIREITO
+           ===================================================== */
+        .right { min-width: 0; }
+
+        .panel-tabs {
+          display: flex; background: var(--bg2);
+          border: 1px solid var(--border); border-radius: var(--r) var(--r) 0 0;
+          padding: 4px; gap: 4px; border-bottom: none;
+        }
+        .ptab {
+          flex: 1; padding: 9px; border: none;
+          border-radius: var(--r-sm); background: transparent;
+          color: var(--text2); cursor: pointer;
+          font-size: 13px; font-weight: 500;
+          display: flex; align-items: center;
+          justify-content: center; gap: 7px;
+          transition: all .15s;
+        }
+        .ptab.active { background: var(--bg3); color: var(--text); }
+
+        .panel-body {
+          background: var(--bg2); border: 1px solid var(--border);
+          border-radius: 0 0 var(--r) var(--r);
+          padding: 18px; min-height: 420px;
+        }
+        .panel-header {
+          display: flex; justify-content: space-between; align-items: center;
+          margin-bottom: 14px;
+        }
+        .panel-header h3 { font-size: 13px; font-weight: 600; }
+
+        /* Badge contador alertas */
+        .badge {
+          background: var(--danger); color: #fff;
+          border-radius: 10px; padding: 1px 7px;
+          font-size: 11px; font-weight: 700;
+        }
+
+        /* Itens de histórico */
+        .tx-item {
+          display: flex; align-items: center; gap: 11px;
+          padding: 11px; border-radius: var(--r-sm);
+          border: 1px solid var(--border); margin-bottom: 7px;
+          transition: border-color .15s;
+        }
+        .tx-item:hover { border-color: var(--border2); }
+        .tx-icon {
+          width: 34px; height: 34px; border-radius: 50%;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 15px; flex-shrink: 0;
+        }
+        .tx-icon.completed { background: var(--s-bg); }
+        .tx-icon.failed    { background: var(--d-bg); }
+        .tx-icon.pending   { background: var(--w-bg); }
+        .tx-icon.processing{ background: var(--w-bg); }
+        .tx-info { flex: 1; min-width: 0; }
+        .tx-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .tx-key  { font-size: 11px; color: var(--text2); }
+        .tx-date { font-size: 11px; color: var(--text3); margin-top: 1px; }
+        .tx-right { text-align: right; }
+        .tx-amount { font-weight: 700; font-size: 14px; color: var(--danger); }
+        .tx-status { font-size: 11px; margin-top: 2px; }
+        .tx-status.completed { color: var(--success); }
+        .tx-status.failed    { color: var(--danger); }
+        .tx-status.pending,
+        .tx-status.processing{ color: var(--warning); }
+
+        /* Alertas anomalia */
+        .anomaly-info {
+          background: var(--bg3); border: 1px solid var(--border);
+          border-radius: var(--r-sm); padding: 11px;
+          font-size: 12px; color: var(--text2); line-height: 1.6;
+          margin-bottom: 14px;
+        }
+        .alert-card {
+          background: var(--w-bg); border: 1px solid rgba(245,158,11,.3);
+          border-radius: var(--r-sm); padding: 13px; margin-bottom: 9px;
+        }
+        .alert-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; }
+        .alert-amount{ font-size: 17px; font-weight: 700; color: var(--warning); }
+        .alert-score {
+          font-size: 11px; background: rgba(245,158,11,.2);
+          color: var(--warning); padding: 2px 8px; border-radius: 4px; font-weight: 600;
+        }
+        .alert-reason{ font-size: 12px; color: var(--text2); margin-bottom: 9px; line-height: 1.5; }
+        .alert-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 7px; }
+        .a-stat { background: rgba(255,255,255,.04); border-radius: 6px; padding: 7px; text-align: center; }
+        .a-stat-lbl  { font-size: 10px; color: var(--text3); text-transform: uppercase; }
+        .a-stat-val  { font-size: 13px; font-weight: 600; color: var(--text); margin-top: 2px; }
+        .alert-time  { font-size: 11px; color: var(--text3); margin-top: 7px; }
+
+        /* Empty state */
+        .empty { text-align: center; color: var(--text3); padding: 40px 20px; font-size: 13px; line-height: 1.7; }
+
+        /* Toast de feedback */
+        #toast {
+          position: fixed; bottom: 24px; right: 24px;
+          background: var(--bg2); border: 1px solid var(--border);
+          border-radius: var(--r-sm); padding: 12px 18px;
+          font-size: 13px; font-weight: 500;
+          box-shadow: 0 8px 24px rgba(0,0,0,.5);
+          transform: translateY(80px); opacity: 0;
+          transition: all .25s; z-index: 9999;
+          max-width: 320px;
+        }
+        #toast.show { transform: translateY(0); opacity: 1; }
+        #toast.ok   { border-left: 3px solid var(--success); color: var(--success); }
+        #toast.err  { border-left: 3px solid var(--danger);  color: var(--danger); }
+        #toast.warn { border-left: 3px solid var(--warning); color: var(--warning); }
+
+        /* Responsivo */
+        @media (max-width: 860px) {
+          .content { grid-template-columns: 1fr; }
+        }
+
+        /* Spinner de loading */
+        .spin {
+          display: inline-block; width: 14px; height: 14px;
+          border: 2px solid rgba(255,255,255,.3);
+          border-top-color: #fff; border-radius: 50%;
+          animation: spin .6s linear infinite;
+          vertical-align: middle; margin-right: 6px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<!-- =====================================================
+     TOAST (feedback global)
+     ===================================================== -->
+<div id="toast"></div>
+
+<!-- =====================================================
+     TELA DE AUTH
+     ===================================================== -->
+<div id="auth-screen">
+    <div class="auth-box">
+
+        <div class="logo">
+            <div class="logo-icon">₽</div>
+            <h1>PIX Simulator</h1>
+            <p>Idempotência · JWT · Kafka · Anomalia</p>
+        </div>
+
+        <!-- Abas -->
+        <div class="tabs">
+            <button class="tab active" id="tab-login"    onclick="switchAuthTab('login')">Entrar</button>
+            <button class="tab"        id="tab-register" onclick="switchAuthTab('register')">Cadastrar</button>
+        </div>
+
+        <!-- LOGIN -->
+        <form id="form-login" onsubmit="handleLogin(event)">
+            <div class="form-group">
+                <label>CPF (11 dígitos)</label>
+                <input id="l-cpf" type="text" maxlength="11" placeholder="12345678901"
+                       oninput="this.value=this.value.replace(/\D/g,'')" required>
+            </div>
+            <div class="form-group">
+                <label>Senha</label>
+                <input id="l-pwd" type="password" placeholder="Sua senha" required>
+            </div>
+            <button type="submit" class="btn btn-primary" id="btn-login">Entrar</button>
+            <div id="msg-login"></div>
+        </form>
+
+        <!-- CADASTRO -->
+        <form id="form-register" class="hidden" onsubmit="handleRegister(event)">
+            <div class="form-group">
+                <label>Nome completo</label>
+                <input id="r-name" type="text" placeholder="João Silva" required>
+            </div>
+            <div class="form-group">
+                <label>CPF (11 dígitos)</label>
+                <input id="r-cpf" type="text" maxlength="11" placeholder="12345678901"
+                       oninput="this.value=this.value.replace(/\D/g,'')" required>
+            </div>
+            <div class="form-group">
+                <label>Senha</label>
+                <input id="r-pwd" type="password" placeholder="Mínimo 6 caracteres" required>
+            </div>
+            <div class="form-group">
+                <label>Chave PIX</label>
+                <input id="r-pix" type="text" placeholder="seu@email.com ou CPF" required>
+            </div>
+            <div class="form-group">
+                <label>Saldo inicial (R$)</label>
+                <input id="r-bal" type="number" placeholder="1000.00" step="0.01" min="0" value="1000">
+            </div>
+            <button type="submit" class="btn btn-primary" id="btn-register">Criar conta</button>
+            <div id="msg-register"></div>
+        </form>
+
+    </div>
+</div>
+
+<!-- =====================================================
+     TELA PRINCIPAL
+     ===================================================== -->
+<div id="main-screen">
+
+    <!-- Navbar -->
+    <header class="navbar">
+        <div class="navbar-brand">
+            <span class="logo-sm">₽</span>
+            PIX Simulator
+        </div>
+        <div class="navbar-user">
+            <span id="nav-name"></span>
+            <button class="btn-ghost" onclick="doLogout()">Sair</button>
+        </div>
+    </header>
+
+    <div class="content">
+
+        <!-- ============= COLUNA ESQUERDA ============= -->
+        <div class="left">
+
+            <!-- Saldo -->
+            <div class="card account-card">
+                <div class="account-header">
+                    <div>
+                        <div class="account-name" id="acc-name">---</div>
+                        <div class="account-key"  id="acc-key">---</div>
+                    </div>
+                    <button class="btn-icon" onclick="refreshAccount()" title="Atualizar">↻</button>
+                </div>
+                <div>
+                    <div class="balance-label">Saldo disponível</div>
+                    <div class="balance-val" id="acc-balance">R$ ---</div>
+                </div>
+            </div>
+
+            <!-- Depósito (teste) -->
+            <div class="card">
+                <div class="card-title">
+                    Depositar saldo
+                    <span class="badge-test">Teste</span>
+                </div>
+                <div class="inline-form">
+                    <input id="dep-amount" type="number" placeholder="500.00" step="0.01" min="0.01">
+                    <button class="btn btn-secondary" onclick="handleDeposit()">Depositar</button>
+                </div>
+            </div>
+
+            <!-- Enviar PIX -->
+            <div class="card">
+                <div class="card-title">Enviar PIX</div>
+
+                <!-- Chave de idempotência -->
+                <div class="idp-box">
+                    <div class="idp-header">
+                        <span class="idp-label">🔑 Chave de idempotência (UUID)</span>
+                        <button class="btn-link" onclick="newIdpKey()">Nova chave</button>
+                    </div>
+                    <div class="idp-key" id="idp-key">---</div>
+                    <div class="idp-hint">
+                        Clique "Enviar PIX" várias vezes com o mesmo UUID → só debita uma vez
+                    </div>
+                </div>
+
+                <!-- Formulário PIX -->
+                <div class="form-group">
+                    <label>Chave PIX do destinatário</label>
+                    <input id="p-key" type="text" placeholder="destino@email.com">
+                </div>
+                <div class="form-group">
+                    <label>Valor (R$)</label>
+                    <input id="p-val" type="number" placeholder="150.00" step="0.01" min="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Descrição (opcional)</label>
+                    <input id="p-desc" type="text" placeholder="Almoço">
+                </div>
+
+                <button class="btn btn-pix" id="btn-pix" onclick="sendPix()">
+                    Enviar PIX
+                </button>
+                <button class="btn btn-retry hidden" id="btn-retry" onclick="retryPix()">
+                    🔁 Reenviar com mesmo UUID — testar idempotência
+                </button>
+
+                <!-- Resultado -->
+                <div id="pix-result"></div>
+            </div>
+
+        </div>
+
+        <!-- ============= COLUNA DIREITA ============= -->
+        <div class="right">
+
+            <!-- Abas painel -->
+            <div class="panel-tabs">
+                <button class="ptab active" id="ptab-hist"   onclick="switchPanel('hist')">Transações</button>
+                <button class="ptab"        id="ptab-alerts" onclick="switchPanel('alerts')">
+                    Alertas de Anomalia
+                    <span class="badge hidden" id="alert-count">0</span>
+                </button>
+            </div>
+
+            <!-- Painel histórico -->
+            <div class="panel-body" id="panel-hist">
+                <div class="panel-header">
+                    <h3>Histórico de transações</h3>
+                    <button class="btn-icon" onclick="loadHistory()">↻</button>
+                </div>
+                <div id="list-hist">
+                    <div class="empty">Nenhuma transação ainda</div>
+                </div>
+            </div>
+
+            <!-- Painel alertas -->
+            <div class="panel-body hidden" id="panel-alerts">
+                <div class="panel-header">
+                    <h3>Alertas de anomalia</h3>
+                    <button class="btn-icon" onclick="loadAlerts()">↻</button>
+                </div>
+                <div class="anomaly-info">
+                    <strong>Como funciona:</strong> após cada PIX, o sistema analisa seus
+                    últimos 30 dias de transações. Se o valor superar
+                    <strong>média + 3 × desvio padrão</strong>, um alerta é registrado.
+                    Necessita de pelo menos 5 transações no histórico.
+                </div>
+                <div id="list-alerts">
+                    <div class="empty">
+                        Nenhum alerta ainda.<br><br>
+                        Faça 5+ PIX pequenos (ex: R$ 50) e depois envie um muito alto (ex: R$ 5.000)
+                        para ver o detector de anomalia em ação.
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+    /* ==========================================================
+       CONFIGURAÇÃO
+       A API é chamada na mesma origem (sem CORS),
+       pois o Spring Boot serve este HTML e os endpoints /api/*.
+       ========================================================== */
+    const API = '/api';   // sem host — mesma origem do servidor
+
+    // Estado da sessão
+    let token       = null;
+    let accountId   = null;
+    let idpKey      = null;   // chave de idempotência atual
+    let lastPayload = null;   // payload do último PIX (para retry)
+
+    /* ==========================================================
+       UTILITÁRIOS
+       ========================================================== */
+
+    /**
+     * Faz uma chamada à API REST do Spring Boot.
+     * Injeta automaticamente o header Authorization quando autenticado.
+     * Lança Error com a mensagem do backend em caso de falha.
+     */
+    async function api(path, opts = {}) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res  = await fetch(API + path, { ...opts, headers });
+      const body = await res.json();
+
+      if (!res.ok) {
+        // Trata erros de validação (campo "data" com mapa de erros)
+        if (body.data && typeof body.data === 'object') {
+          const msgs = Object.values(body.data).join(' | ');
+          throw new Error(msgs);
+        }
+        throw new Error(body.message || `Erro ${res.status}`);
+      }
+      return body;
+    }
+
+    /** Gera UUID v4 para chave de idempotência */
+    function uuid() {
+      if (crypto?.randomUUID) return crypto.randomUUID();
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+      });
+    }
+
+    /** Formata valor monetário em BRL */
+    function brl(v) {
+      return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+    }
+
+    /** Formata data/hora em pt-BR */
+    function dt(s) {
+      return s ? new Date(s).toLocaleString('pt-BR') : '—';
+    }
+
+    /** Exibe toast de feedback */
+    let _toastTimer;
+    function toast(msg, type = 'ok') {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.className   = `show ${type}`;
+      clearTimeout(_toastTimer);
+      _toastTimer = setTimeout(() => { el.className = ''; }, 3500);
+    }
+
+    /** Mostra mensagem inline nos formulários de auth */
+    function authMsg(id, msg, type) {
+      const el = document.getElementById(id);
+      el.className = `auth-msg ${type}`;
+      el.textContent = msg;
+      if (type === 'success') setTimeout(() => el.textContent = '', 4000);
+    }
+
+    /** Coloca spinner + texto num botão */
+    function setBtnLoading(id, text) {
+      const b = document.getElementById(id);
+      b.disabled   = true;
+      b.innerHTML  = `<span class="spin"></span>${text}`;
+    }
+    function resetBtn(id, text) {
+      const b = document.getElementById(id);
+      b.disabled  = false;
+      b.innerHTML = text;
+    }
+
+    /* ==========================================================
+       AUTH — LOGIN E CADASTRO
+       ========================================================== */
+
+    /** Alterna entre as abas "Entrar" e "Cadastrar" */
+    function switchAuthTab(tab) {
+      document.getElementById('form-login').classList.toggle('hidden', tab !== 'login');
+      document.getElementById('form-register').classList.toggle('hidden', tab !== 'register');
+      document.getElementById('tab-login').classList.toggle('active', tab === 'login');
+      document.getElementById('tab-register').classList.toggle('active', tab === 'register');
+    }
+
+    /** POST /api/auth/login */
+    async function handleLogin(e) {
+      e.preventDefault();
+      setBtnLoading('btn-login', 'Entrando…');
+      try {
+        // Envia CPF + senha para o backend
+        const res = await api('/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({
+            cpf:      document.getElementById('l-cpf').value.trim(),
+            password: document.getElementById('l-pwd').value
+          })
+        });
+
+        // Armazena token JWT na memória e no sessionStorage (persiste ao recarregar)
+        token     = res.data.token;
+        accountId = res.data.accountId;
+        sessionStorage.setItem('pix_token', token);
+        sessionStorage.setItem('pix_aid',   accountId);
+
+        enterApp(res.data.name);
+      } catch (err) {
+        authMsg('msg-login', err.message, 'error');
+      } finally {
+        resetBtn('btn-login', 'Entrar');
+      }
+    }
+
+    /** POST /api/accounts/register */
+    async function handleRegister(e) {
+      e.preventDefault();
+      setBtnLoading('btn-register', 'Criando conta…');
+      try {
+        await api('/accounts/register', {
+          method: 'POST',
+          body: JSON.stringify({
+            name:           document.getElementById('r-name').value.trim(),
+            cpf:            document.getElementById('r-cpf').value.trim(),
+            password:       document.getElementById('r-pwd').value,
+            pixKey:         document.getElementById('r-pix').value.trim(),
+            initialBalance: parseFloat(document.getElementById('r-bal').value) || 0
+          })
+        });
+
+        authMsg('msg-register', 'Conta criada! Faça login para continuar.', 'success');
+        document.getElementById('form-register').reset();
+        setTimeout(() => switchAuthTab('login'), 1500);
+      } catch (err) {
+        authMsg('msg-register', err.message, 'error');
+      } finally {
+        resetBtn('btn-register', 'Criar conta');
+      }
+    }
+
+    /** Desloga e volta para a tela de auth */
+    function doLogout() {
+      token = null; accountId = null; idpKey = null; lastPayload = null;
+      sessionStorage.clear();
+      document.getElementById('main-screen').classList.remove('active');
+      document.getElementById('auth-screen').style.display = 'flex';
+      // Limpa campos
+      document.getElementById('l-cpf').value = '';
+      document.getElementById('l-pwd').value = '';
+    }
+
+    /* ==========================================================
+       TELA PRINCIPAL
+       ========================================================== */
+
+    /** Entra na tela principal após autenticação bem-sucedida */
+    function enterApp(name) {
+      document.getElementById('auth-screen').style.display = 'none';
+      document.getElementById('main-screen').classList.add('active');
+      document.getElementById('nav-name').textContent = name;
+      newIdpKey();          // gera a primeira chave de idempotência
+      refreshAccount();     // carrega saldo e dados da conta
+      loadHistory();        // carrega histórico de transações
+      loadAlerts();         // carrega alertas de anomalia
+    }
+
+    /* ==========================================================
+       CONTA — GET /api/accounts/me
+       ========================================================== */
+
+    /** Atualiza saldo e dados da conta exibidos no card */
+    async function refreshAccount() {
+      try {
+        const res = await api('/accounts/me');
+        const acc = res.data;
+        document.getElementById('acc-name').textContent    = acc.name;
+        document.getElementById('acc-key').textContent     = `🔑 ${acc.pixKey}`;
+        document.getElementById('acc-balance').textContent = brl(acc.balance);
+      } catch (err) {
+        console.error('[conta]', err.message);
+      }
+    }
+
+    /* ==========================================================
+       DEPÓSITO — POST /api/accounts/deposit
+       ========================================================== */
+
+    async function handleDeposit() {
+      const amount = parseFloat(document.getElementById('dep-amount').value);
+      if (!amount || amount <= 0) { toast('Informe um valor válido', 'err'); return; }
+
+      try {
+        await api('/accounts/deposit', {
+          method: 'POST',
+          body: JSON.stringify({ amount })
+        });
+        document.getElementById('dep-amount').value = '';
+        await refreshAccount();   // atualiza saldo exibido
+        toast(`Depósito de ${brl(amount)} realizado`, 'ok');
+      } catch (err) {
+        toast('Depósito falhou: ' + err.message, 'err');
+      }
+    }
+
+    /* ==========================================================
+       IDEMPOTÊNCIA
+       ========================================================== */
+
+    /**
+     * Gera um novo UUID e atualiza o display.
+     * Deve ser chamado antes de cada novo PIX.
+     * Para testar idempotência: NÃO chame esta função — use o botão de retry.
+     */
+    function newIdpKey() {
+      idpKey = uuid();
+      document.getElementById('idp-key').textContent = idpKey;
+      document.getElementById('btn-retry').classList.add('hidden');
+      document.getElementById('pix-result').innerHTML = '';
+      lastPayload = null;
+    }
+
+    /* ==========================================================
+       PIX — POST /api/pix/send
+       ========================================================== */
+
+    /** Lê os campos e envia o PIX */
+    async function sendPix() {
+      const key  = document.getElementById('p-key').value.trim();
+      const val  = parseFloat(document.getElementById('p-val').value);
+      const desc = document.getElementById('p-desc').value.trim();
+
+      if (!key)          { toast('Informe a chave PIX do destinatário', 'err'); return; }
+      if (!val || val <= 0) { toast('Informe um valor válido', 'err'); return; }
+
+      lastPayload = {
+        idempotencyKey: idpKey,   // UUID gerado pelo frontend — chave de idempotência
+        receiverPixKey: key,
+        amount:         val,
+        description:    desc || null
+      };
+
+      await execPix(lastPayload);
+    }
+
+    /**
+     * Reenvia o mesmo payload com o MESMO idempotencyKey.
+     * O backend deve detectar a chave já usada e retornar o resultado cacheado
+     * sem debitar novamente.
+     */
+    async function retryPix() {
+      if (!lastPayload) return;
+      await execPix(lastPayload);
+    }
+
+    /** Executa a chamada à API de PIX e renderiza o resultado */
+    async function execPix(payload) {
+      setBtnLoading('btn-pix', 'Processando…');
+      try {
+        const res = await api('/pix/send', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+
+        const pix = res.data;
+        renderPixResult(pix);
+
+        if (!pix.idempotentResponse) {
+          // Primeiro processamento bem-sucedido: mostra botão de retry para demonstração
+          document.getElementById('btn-retry').classList.remove('hidden');
+          refreshAccount();   // atualiza saldo
+          loadHistory();      // atualiza histórico
+          // Recarrega alertas com pequeno atraso (Kafka é assíncrono)
+          setTimeout(loadAlerts, 2500);
+        }
+
+      } catch (err) {
+        renderPixError(err.message);
+      } finally {
+        resetBtn('btn-pix', 'Enviar PIX');
+      }
+    }
+
+    /** Renderiza o card de resultado do PIX */
+    function renderPixResult(pix) {
+      const isIdp = pix.idempotentResponse;
+      const el    = document.getElementById('pix-result');
+
+      el.className = `pix-result ${isIdp ? 'idp' : 'ok'}`;
+      el.innerHTML = `
+        <div class="res-title" style="color:${isIdp ? 'var(--warning)' : 'var(--success)'}">
+          ${isIdp ? '🔁 Idempotência ativada — resultado cacheado' : '✅ PIX realizado com sucesso'}
+        </div>
+        ${isIdp ? `<div class="res-note">
+          O backend detectou o mesmo UUID e retornou o resultado original.<br>
+          Nenhum débito foi realizado nesta chamada.
+        </div>` : ''}
+        <div class="res-row">
+          <span class="res-lbl">Destinatário</span>
+          <span class="res-val">${esc(pix.receiverName)}</span>
+        </div>
+        <div class="res-row">
+          <span class="res-lbl">Chave PIX</span>
+          <span class="res-val">${esc(pix.receiverPixKey)}</span>
+        </div>
+        <div class="res-row">
+          <span class="res-lbl">Valor</span>
+          <span class="res-val ${isIdp ? 'w' : 'ok'}">${brl(pix.amount)}</span>
+        </div>
+        <div class="res-row">
+          <span class="res-lbl">Status</span>
+          <span class="res-val ${isIdp ? 'w' : 'ok'}">${pix.status}</span>
+        </div>
+        <div class="res-row">
+          <span class="res-lbl">Transação #</span>
+          <span class="res-val">${pix.transactionId}</span>
+        </div>
+        <div class="res-row">
+          <span class="res-lbl">UUID</span>
+          <span style="font-family:monospace;font-size:10px;color:var(--text3)">${pix.idempotencyKey}</span>
+        </div>
+      `;
+    }
+
+    /** Renderiza erro no card de resultado */
+    function renderPixError(msg) {
+      const el = document.getElementById('pix-result');
+      el.className = 'pix-result fail';
+      el.innerHTML = `<div style="color:var(--danger);font-weight:600">❌ ${esc(msg)}</div>`;
+    }
+
+    /* ==========================================================
+       HISTÓRICO — GET /api/pix/history
+       ========================================================== */
+
+    async function loadHistory() {
+      try {
+        const res  = await api('/pix/history');
+        const list = res.data;
+        const el   = document.getElementById('list-hist');
+
+        if (!list?.length) {
+          el.innerHTML = '<div class="empty">Nenhuma transação ainda</div>';
+          return;
+        }
+
+        const icons = { COMPLETED:'✅', FAILED:'❌', PENDING:'⏳', PROCESSING:'🔄', CANCELLED:'🚫' };
+        el.innerHTML = list.map(tx => {
+          const cls = tx.status.toLowerCase();
+          return `
+            <div class="tx-item">
+              <div class="tx-icon ${cls}">${icons[tx.status] || '❓'}</div>
+              <div class="tx-info">
+                <div class="tx-name">${esc(tx.receiverName || 'Destinatário')}</div>
+                <div class="tx-key">${esc(tx.receiverPixKey)}</div>
+                ${tx.description ? `<div class="tx-date">${esc(tx.description)}</div>` : ''}
+                <div class="tx-date">${dt(tx.createdAt)}</div>
+              </div>
+              <div class="tx-right">
+                <div class="tx-amount">− ${brl(tx.amount)}</div>
+                <div class="tx-status ${cls}">${tx.status}</div>
+              </div>
+            </div>`;
+        }).join('');
+      } catch (err) {
+        console.error('[histórico]', err.message);
+      }
+    }
+
+    /* ==========================================================
+       ALERTAS DE ANOMALIA — GET /api/anomaly/alerts
+       ========================================================== */
+
+    async function loadAlerts() {
+      try {
+        const res    = await api('/anomaly/alerts');
+        const alerts = res.data;
+        const el     = document.getElementById('list-alerts');
+        const badge  = document.getElementById('alert-count');
+
+        if (!alerts?.length) {
+          el.innerHTML = `<div class="empty">
+            Nenhum alerta ainda.<br><br>
+            Faça 5+ PIX pequenos (ex: R$ 50) e depois envie um muito alto (ex: R$ 5.000)
+            para ver o detector de anomalia em ação.
+          </div>`;
+          badge.classList.add('hidden');
+          return;
+        }
+
+        badge.textContent = alerts.length;
+        badge.classList.remove('hidden');
+
+        el.innerHTML = alerts.map(a => `
+          <div class="alert-card">
+            <div class="alert-head">
+              <div class="alert-amount">⚠️ ${brl(a.transactionAmount)}</div>
+              <div class="alert-score">Z-Score ${Number(a.deviationScore).toFixed(1)}×</div>
+            </div>
+            <div class="alert-reason">${esc(a.alertReason)}</div>
+            <div class="alert-stats">
+              <div class="a-stat">
+                <div class="a-stat-lbl">Média histórica</div>
+                <div class="a-stat-val">${brl(a.historicalAverage)}</div>
+              </div>
+              <div class="a-stat">
+                <div class="a-stat-lbl">Desvio padrão</div>
+                <div class="a-stat-val">${brl(a.standardDeviation)}</div>
+              </div>
+              <div class="a-stat">
+                <div class="a-stat-lbl">Amostras</div>
+                <div class="a-stat-val">${a.historicalCount} tx</div>
+              </div>
+            </div>
+            <div class="alert-time">${dt(a.createdAt)}</div>
+          </div>
+        `).join('');
+      } catch (err) {
+        console.error('[alertas]', err.message);
+      }
+    }
+
+    /* ==========================================================
+       PAINEL DIREITO — ABAS
+       ========================================================== */
+
+    function switchPanel(tab) {
+      const isHist = tab === 'hist';
+      document.getElementById('panel-hist').classList.toggle('hidden', !isHist);
+      document.getElementById('panel-alerts').classList.toggle('hidden', isHist);
+      document.getElementById('ptab-hist').classList.toggle('active', isHist);
+      document.getElementById('ptab-alerts').classList.toggle('active', !isHist);
+      if (!isHist) loadAlerts();
+    }
+
+    /* ==========================================================
+       SEGURANÇA — escape de HTML para evitar XSS
+       ========================================================== */
+    function esc(s) {
+      if (s == null) return '';
+      return String(s)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    /* ==========================================================
+       RESTAURAR SESSÃO AO RECARREGAR A PÁGINA
+       Se o usuário recarregar, o token no sessionStorage evita
+       que precise fazer login novamente (até fechar a aba).
+       ========================================================== */
+    window.addEventListener('DOMContentLoaded', () => {
+      const t  = sessionStorage.getItem('pix_token');
+      const id = sessionStorage.getItem('pix_aid');
+      if (t && id) {
+        token     = t;
+        accountId = parseInt(id);
+        // Valida o token fazendo uma chamada autenticada
+        api('/accounts/me')
+          .then(res => enterApp(res.data.name))
+          .catch(() => {
+            // Token expirado ou inválido — volta ao login
+            sessionStorage.clear();
+          });
+      }
+    });
+</script>
+</body>
+</html>

@@ -1,0 +1,154 @@
+version: '3.8'
+
+# ============================================================
+# PIX Simulator - Infraestrutura Docker
+# ============================================================
+# Sobe todos os serviços necessários para rodar a aplicação:
+# - PostgreSQL: banco de dados principal
+# - Redis: armazenamento das chaves de idempotência
+# - Zookeeper: coordenador do Kafka (obrigatório)
+# - Kafka: mensageria para eventos de transação
+# - Kafka UI: interface visual para monitorar tópicos (opcional, mas útil)
+#
+# Como usar:
+#   docker-compose up -d          → sobe todos os serviços em background
+#   docker-compose down           → para e remove os containers
+#   docker-compose logs -f kafka  → acompanha os logs do Kafka
+#   docker-compose ps             → vê o status de cada serviço
+
+services:
+
+  # ========== PostgreSQL ==========
+  # Banco de dados relacional - armazena contas, transações e alertas
+  postgres:
+    image: postgres:15-alpine  # alpine = imagem menor
+    container_name: pix-postgres
+    environment:
+      POSTGRES_DB: pixdb          # nome do banco criado automaticamente
+      POSTGRES_USER: pix_user     # usuário (deve bater com application.yml)
+      POSTGRES_PASSWORD: pix_pass # senha (deve bater com application.yml)
+    ports:
+      - "5432:5432"               # expõe para conexão local (DBeaver, etc.)
+    volumes:
+      # Volume nomeado: dados persistem mesmo se o container for recriado
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # Verifica se o banco está pronto para aceitar conexões
+      test: ["CMD-SHELL", "pg_isready -U pix_user -d pixdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pix-network
+
+  # ========== Redis ==========
+  # Cache em memória - armazena chaves de idempotência com TTL
+  redis:
+    image: redis:7-alpine
+    container_name: pix-redis
+    ports:
+      - "6379:6379"               # porta padrão do Redis
+    volumes:
+      # Persiste os dados do Redis (opcional - dados de idempotência são temporários)
+      - redis_data:/data
+    command: redis-server --appendonly yes  # habilita persistência AOF
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - pix-network
+
+  # ========== Zookeeper ==========
+  # Coordenador de cluster obrigatório para o Kafka (versões < 3.x)
+  # Gerencia eleição de líder, configurações e metadados do Kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: pix-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181    # porta de comunicação com o Kafka
+      ZOOKEEPER_TICK_TIME: 2000      # intervalo de heartbeat em ms
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pix-network
+
+  # ========== Kafka ==========
+  # Message broker - recebe eventos de transação e entrega ao detector de anomalia
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: pix-kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy  # espera Zookeeper estar saudável antes de subir
+    ports:
+      - "9092:9092"               # porta para conexão da aplicação Spring Boot
+    environment:
+      KAFKA_BROKER_ID: 1          # ID único do broker (necessário em clusters multi-broker)
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181  # endereço do Zookeeper
+      # Listeners: define como o Kafka aceita conexões
+      # PLAINTEXT://kafka:29092 → dentro da rede Docker (entre containers)
+      # PLAINTEXT_HOST://0.0.0.0:9092 → fora da rede Docker (aplicação Spring Boot)
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Para ambiente de dev com 1 único broker: replication factor mínimo = 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # Cria os tópicos automaticamente quando a aplicação publica pela primeira vez
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    networks:
+      - pix-network
+
+  # ========== Kafka UI ==========
+  # Interface web para visualizar tópicos, mensagens e consumers
+  # Acesse: http://localhost:8090
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: pix-kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: pix-simulator           # nome exibido na UI
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092 # endereço interno do Kafka
+    networks:
+      - pix-network
+
+# ========== VOLUMES ==========
+# Volumes nomeados garantem que os dados persistam entre reinicializações do Docker
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  zookeeper_data:
+    driver: local
+  zookeeper_log:
+    driver: local
+  kafka_data:
+    driver: local
+
+# ========== REDE ==========
+# Rede bridge isolada para comunicação entre os containers
+# Os containers se comunicam pelo nome do serviço (ex: "kafka:29092")
+networks:
+  pix-network:
+    driver: bridge
