@@ -5,6 +5,14 @@ spring:
   application:
     name: pix-simulator
 
+  # ========== FRONTEND ESTÁTICO ==========
+  # Spring Boot serve automaticamente arquivos de src/main/resources/static/
+  # O index.html é servido na raiz: http://localhost:8080/
+  web:
+    resources:
+      static-locations: classpath:/static/
+      add-mappings: true
+
   # ========== BANCO DE DADOS ==========
   # Configurações de conexão com o PostgreSQL rodando no Docker
   datasource:
