@@ -8,6 +8,7 @@ import com.pix_simulator.Pix.Simulator.account.AccountService;
 import com.pix_simulator.Pix.Simulator.entity.Transaction;
 import com.pix_simulator.Pix.Simulator.entity.TransactionRepository;
 import com.pix_simulator.Pix.Simulator.entity.TransactionStatus;
+import com.pix_simulator.Pix.Simulator.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.common.errors.ResourceNotFoundException;
@@ -59,13 +60,13 @@ public class PixService {
     /**
      * Processa um PIX com garantia de idempotência.
      *
-     * @Transactional garante que todas as operações de banco são atômicas:
+     * - @Transactional garante que todas as operações de banco são atômicas:
      * se qualquer passo falhar, TUDO é revertido (débito, crédito, log).
      * Sem @Transactional: poderia debitar e não creditar, ou vice-versa.
      *
-     * @param senderId       ID da conta remetente (extraído do JWT)
-     * @param request        dados do PIX (chave, valor, idempotencyKey)
-     * @return resultado do processamento ou resposta cacheada se for duplicata
+     * - @param senderId       ID da conta remetente (extraído do JWT)
+     * - @param request        dados do PIX (chave, valor, idempotencyKey)
+     * - @return resultado do processamento ou resposta cacheada se for duplicata
      */
     @Transactional
     public PixDTO.PixResponse sendPix(Long senderId, PixDTO.PixRequest request) {

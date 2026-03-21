@@ -1,8 +1,8 @@
 package com.pix_simulator.Pix.Simulator.auth;
 
 
+import com.pix_simulator.Pix.Simulator.shared.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
-import com.pix_simulator.shared.response.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;

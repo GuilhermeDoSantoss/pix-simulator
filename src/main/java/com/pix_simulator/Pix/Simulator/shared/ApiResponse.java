@@ -17,10 +17,10 @@ import java.time.LocalDateTime;
  *   "timestamp": "2024-01-15T10:30:00"
  * }
  *
- * @JsonInclude(NON_NULL) omite campos null do JSON de resposta,
+ * - @JsonInclude(NON_NULL) omite campos null do JSON de resposta,
  * mantendo o payload limpo (ex: campo "data" não aparece em erros sem dados).
  *
- * @param <T> tipo do dado retornado no campo "data"
+ * - @param <T> tipo do dado retornado no campo "data"
  */
 @Data
 @Builder
@@ -62,7 +62,7 @@ public class ApiResponse<T> {
     }
 
     /**
-     * Método factory para respostas de erro.
+     * Metodo factory para respostas de erro.
      */
     public static <T> ApiResponse<T> error(String message) {
         return ApiResponse.<T>builder()

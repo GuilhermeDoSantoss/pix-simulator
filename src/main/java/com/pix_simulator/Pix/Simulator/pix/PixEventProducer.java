@@ -42,7 +42,7 @@ public class PixEventProducer {
      * para responder ao usuário. O callback de sucesso/erro é tratado
      * separadamente via CompletableFuture.
      *
-     * @param event dados do PIX concluído
+     * - @param event dados do PIX concluído
      */
     public void publishPixEvent(PixEvent event) {
         log.info("Publicando evento PIX no Kafka - transação: {}, conta: {}, valor: R$ {}",

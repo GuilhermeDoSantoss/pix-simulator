@@ -1,5 +1,6 @@
 package com.pix_simulator.Pix.Simulator.auth;
 
+import com.pix_simulator.Pix.Simulator.account.Account;
 import lombok.Getter;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;

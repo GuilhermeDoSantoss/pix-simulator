@@ -13,7 +13,7 @@ import java.util.Optional;
  * save(), findById(), findAll(), deleteById(), count(), etc.
  *
  * Métodos adicionais abaixo usam Spring Data Query Derivation:
- * o Spring gera o SQL automaticamente baseado no nome do método.
+ * o Spring gera o SQL automaticamente baseado no nome do metodo.
  */
 @Repository
 public interface AccountRepository extends JpaRepository<Account, Long> {

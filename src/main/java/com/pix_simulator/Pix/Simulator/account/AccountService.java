@@ -1,5 +1,6 @@
 package com.pix_simulator.Pix.Simulator.account;
 
+import com.pix_simulator.Pix.Simulator.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.common.errors.ResourceNotFoundException;

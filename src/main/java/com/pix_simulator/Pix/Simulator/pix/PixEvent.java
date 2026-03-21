@@ -19,7 +19,7 @@ import java.time.LocalDateTime;
  * - Resiliência: se o detector estiver offline, os eventos ficam no Kafka
  * - Escalabilidade: múltiplos consumers podem processar o mesmo evento
  *
- * @NoArgsConstructor é necessário para o Jackson deserializar o JSON do Kafka
+ * - @NoArgsConstructor é necessário para o Jackson deserializar o JSON do Kafka
  */
 @Data
 @Builder
