@@ -50,11 +50,11 @@ public class AccountController {
     /**
      * Retorna os dados da conta autenticada.
      *
-     * @AuthenticationPrincipal injeta o AccountPrincipal que foi colocado no contexto
+     * - @AuthenticationPrincipal injeta o AccountPrincipal que foi colocado no contexto
      * pelo JwtAuthenticationFilter após validar o token JWT.
      * O accountId vem do token - o usuário NÃO pode consultar dados de outra conta.
      *
-     * @SecurityRequirement(name = "bearerAuth") informa ao Swagger que precisa de token.
+     * - @SecurityRequirement(name = "bearerAuth") informa ao Swagger que precisa de token.
      */
     @GetMapping("/me")
     @Operation(summary = "Minha conta", description = "Retorna os dados da conta autenticada")
