@@ -1,154 +1,161 @@
-version: '3.8'
-
 # ============================================================
 # PIX Simulator - Infraestrutura Docker
 # ============================================================
 # Sobe todos os serviços necessários para rodar a aplicação:
 # - PostgreSQL: banco de dados principal
 # - Redis: armazenamento das chaves de idempotência
-# - Zookeeper: coordenador do Kafka (obrigatório)
-# - Kafka: mensageria para eventos de transação
-# - Kafka UI: interface visual para monitorar tópicos (opcional, mas útil)
+# - Kafka (Bitnami KRaft): mensageria para eventos de transação
+#
+# Diferença em relação à versão anterior:
+# - Removido Zookeeper: o Kafka moderno (3.x+) usa o modo KRaft,
+#   que é auto-gerenciado e não depende mais do Zookeeper.
+#   Isso reduz o download de ~900 MB para ~80 MB.
+# - Removido Kafka UI: não é essencial para rodar o projeto.
+#   Se quiser monitorar os tópicos, use o Kafka UI separadamente.
 #
 # Como usar:
 #   docker-compose up -d          → sobe todos os serviços em background
 #   docker-compose down           → para e remove os containers
 #   docker-compose logs -f kafka  → acompanha os logs do Kafka
 #   docker-compose ps             → vê o status de cada serviço
+#
+# Comandos úteis após subir:
+#   Ver chaves de idempotência no Redis:
+#     docker exec -it pix-redis redis-cli keys "pix:*"
+#
+#   Listar tópicos do Kafka:
+#     docker exec -it pix-kafka kafka-topics.sh --bootstrap-server localhost:9092 --list
+#
+#   Ver mensagens do tópico de eventos PIX:
+#     docker exec -it pix-kafka kafka-console-consumer.sh \
+#       --bootstrap-server localhost:9092 \
+#       --topic pix.events --from-beginning
 
 services:
 
   # ========== PostgreSQL ==========
-  # Banco de dados relacional - armazena contas, transações e alertas
+  # Banco de dados relacional principal.
+  # Armazena: contas (accounts), transações (transactions) e alertas de anomalia (anomaly_alerts).
+  # O Spring Boot cria as tabelas automaticamente via ddl-auto: update no application.yml.
+  # alpine = variante mínima da imagem, muito menor que a versão padrão
   postgres:
-    image: postgres:15-alpine  # alpine = imagem menor
+    image: postgres:15-alpine
     container_name: pix-postgres
     environment:
-      POSTGRES_DB: pixdb          # nome do banco criado automaticamente
-      POSTGRES_USER: pix_user     # usuário (deve bater com application.yml)
-      POSTGRES_PASSWORD: pix_pass # senha (deve bater com application.yml)
+      POSTGRES_DB: pixdb          # nome do banco criado automaticamente na inicialização
+      POSTGRES_USER: pix_user     # usuário — deve bater exatamente com application.yml
+      POSTGRES_PASSWORD: pix_pass # senha — deve bater exatamente com application.yml
     ports:
-      - "5432:5432"               # expõe para conexão local (DBeaver, etc.)
+      # host:container — expõe a porta 5432 do container na porta 5432 da máquina
+      # Permite conexão via DBeaver, pgAdmin ou qualquer client PostgreSQL
+      - "5432:5432"
     volumes:
-      # Volume nomeado: dados persistem mesmo se o container for recriado
+      # Volume nomeado: os dados do banco sobrevivem mesmo se o container for removido e recriado.
+      # Sem isso, todos os dados são perdidos a cada "docker-compose down"
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      # Verifica se o banco está pronto para aceitar conexões
+      # pg_isready verifica se o banco está aceitando conexões antes de liberar outros serviços
       test: ["CMD-SHELL", "pg_isready -U pix_user -d pixdb"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - pix-network
+      interval: 10s    # verifica a cada 10 segundos
+      timeout: 5s      # aguarda no máximo 5 segundos por resposta
+      retries: 5       # após 5 falhas consecutivas, marca como unhealthy
 
   # ========== Redis ==========
-  # Cache em memória - armazena chaves de idempotência com TTL
+  # Cache em memória usado exclusivamente para as chaves de idempotência do PIX.
+  #
+  # Como funciona:
+  # Cada PIX enviado gera uma chave no formato: pix:{accountId}:{uuid}
+  # Exemplo: pix:42:550e8400-e29b-41d4-a716-446655440000
+  # Essa chave tem TTL de 24h (configurável em application.yml).
+  # Se a mesma chave aparecer duas vezes, o backend retorna o resultado cacheado
+  # sem debitar o saldo novamente — isso é a idempotência.
   redis:
     image: redis:7-alpine
     container_name: pix-redis
     ports:
-      - "6379:6379"               # porta padrão do Redis
+      - "6379:6379"   # porta padrão do Redis
     volumes:
-      # Persiste os dados do Redis (opcional - dados de idempotência são temporários)
+      # Persiste os dados em disco usando AOF (Append Only File).
+      # Para chaves de idempotência isso é opcional (elas têm TTL de 24h),
+      # mas garante que o histórico não seja perdido em caso de restart do container.
       - redis_data:/data
-    command: redis-server --appendonly yes  # habilita persistência AOF
+    command: redis-server --appendonly yes  # habilita persistência AOF no disco
     healthcheck:
+      # redis-cli ping retorna PONG se o servidor está respondendo
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
-    networks:
-      - pix-network
 
-  # ========== Zookeeper ==========
-  # Coordenador de cluster obrigatório para o Kafka (versões < 3.x)
-  # Gerencia eleição de líder, configurações e metadados do Kafka
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
-    container_name: pix-zookeeper
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181    # porta de comunicação com o Kafka
-      ZOOKEEPER_TICK_TIME: 2000      # intervalo de heartbeat em ms
-    volumes:
-      - zookeeper_data:/var/lib/zookeeper/data
-      - zookeeper_log:/var/lib/zookeeper/log
-    healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "2181"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - pix-network
-
-  # ========== Kafka ==========
-  # Message broker - recebe eventos de transação e entrega ao detector de anomalia
+  # ========== Kafka (Bitnami KRaft) ==========
+  # Message broker para comunicação assíncrona entre o PIX Module e o Anomaly Detector.
+  #
+  # Por que Bitnami em vez de Confluent?
+  # A imagem da Confluent (confluentinc/cp-kafka) pesa ~438 MB e exige o Zookeeper (~438 MB).
+  # A imagem Bitnami pesa ~80 MB e usa o modo KRaft — Kafka auto-gerenciado sem Zookeeper.
+  # O KRaft é o padrão moderno desde o Kafka 3.x e será obrigatório no Kafka 4.x.
+  #
+  # Fluxo de eventos:
+  # PixService → publica em pix.events → PixEventConsumer → AnomalyDetectorService
+  #
+  # Tópicos criados automaticamente:
+  # - pix.events: publicado após cada PIX concluído (3 partições)
+  # - pix.alerts: publicado quando anomalia é detectada (1 partição)
   kafka:
-    image: confluentinc/cp-kafka:7.5.0
+    image: bitnami/kafka:3.6
     container_name: pix-kafka
-    depends_on:
-      zookeeper:
-        condition: service_healthy  # espera Zookeeper estar saudável antes de subir
     ports:
-      - "9092:9092"               # porta para conexão da aplicação Spring Boot
+      # A aplicação Spring Boot se conecta nessa porta (localhost:9092)
+      - "9092:9092"
     environment:
-      KAFKA_BROKER_ID: 1          # ID único do broker (necessário em clusters multi-broker)
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181  # endereço do Zookeeper
-      # Listeners: define como o Kafka aceita conexões
-      # PLAINTEXT://kafka:29092 → dentro da rede Docker (entre containers)
-      # PLAINTEXT_HOST://0.0.0.0:9092 → fora da rede Docker (aplicação Spring Boot)
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      # Para ambiente de dev com 1 único broker: replication factor mínimo = 1
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      # Cria os tópicos automaticamente quando a aplicação publica pela primeira vez
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      # ---- Configuração KRaft (sem Zookeeper) ----
+      KAFKA_CFG_NODE_ID: 1                              # ID único deste broker no cluster
+      KAFKA_CFG_PROCESS_ROLES: broker,controller        # este nó é broker E controller (modo single-node)
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093  # quorum de controllers: só este nó
+
+      # ---- Listeners ----
+      # PLAINTEXT: porta 9092 — usada pela aplicação Spring Boot (de fora do container)
+      # CONTROLLER: porta 9093 — usada internamente para coordenação KRaft (não exposta)
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      # ---- Comportamento ----
+      # Cria tópicos automaticamente quando a aplicação publica pela primeira vez.
+      # Sem isso, precisaria criar pix.events e pix.alerts manualmente antes de subir o Spring Boot.
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+      # Permite conexões sem autenticação (adequado para desenvolvimento local)
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+
+      # Fator de replicação 1: adequado para 1 único broker em desenvolvimento.
+      # Em produção com múltiplos brokers, usar 3 para tolerância a falhas.
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
     volumes:
-      - kafka_data:/var/lib/kafka/data
+      # Persiste os dados dos tópicos e offsets dos consumers entre restarts
+      - kafka_data:/bitnami/kafka
+
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      # Verifica se o broker está respondendo listando os tópicos
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 10
-    networks:
-      - pix-network
-
-  # ========== Kafka UI ==========
-  # Interface web para visualizar tópicos, mensagens e consumers
-  # Acesse: http://localhost:8090
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    container_name: pix-kafka-ui
-    depends_on:
-      kafka:
-        condition: service_healthy
-    ports:
-      - "8090:8080"
-    environment:
-      KAFKA_CLUSTERS_0_NAME: pix-simulator           # nome exibido na UI
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092 # endereço interno do Kafka
-    networks:
-      - pix-network
+      start_period: 30s  # aguarda 30s antes de começar a verificar (Kafka demora para iniciar)
 
 # ========== VOLUMES ==========
-# Volumes nomeados garantem que os dados persistam entre reinicializações do Docker
+# Volumes nomeados gerenciados pelo Docker.
+# Os dados ficam em: C:\Users\<user>\AppData\Local\Docker\wsl\data (Windows)
+# Persistem entre "docker-compose down" e "docker-compose up".
+# Para apagar tudo e começar do zero: docker-compose down -v
 volumes:
   postgres_data:
-    driver: local
+    driver: local  # armazenamento local na máquina host
   redis_data:
-    driver: local
-  zookeeper_data:
-    driver: local
-  zookeeper_log:
     driver: local
   kafka_data:
     driver: local
-
-# ========== REDE ==========
-# Rede bridge isolada para comunicação entre os containers
-# Os containers se comunicam pelo nome do serviço (ex: "kafka:29092")
-networks:
-  pix-network:
-    driver: bridge
