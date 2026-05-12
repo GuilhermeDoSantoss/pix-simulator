@@ -1,164 +1,132 @@
 # ============================================================
-# PIX Simulator - Infraestrutura Docker
+# PIX Simulator — Infraestrutura Docker
 # ============================================================
-# Sobe todos os serviços necessários para rodar a aplicação:
-# - PostgreSQL: banco de dados principal
-# - Redis: armazenamento das chaves de idempotência
-# - Kafka (Apache oficial, modo KRaft): mensageria para eventos de transação
 #
-# Por que não usamos Confluent (confluentinc/cp-kafka)?
-# A imagem Confluent + Zookeeper somam ~900 MB de download.
-# A imagem apache/kafka usa KRaft (sem Zookeeper) e pesa ~500 MB,
-# mas é a imagem oficial mantida pelo Apache Software Foundation.
+# Este projeto usa H2 in-memory para o banco de dados.
+# Apenas o Kafka precisa rodar via Docker.
 #
-# Modo KRaft: Kafka auto-gerenciado sem Zookeeper.
-# É o padrão desde o Kafka 3.x e obrigatório no Kafka 4.x.
-#
-# Como usar:
-#   docker-compose up -d          → sobe todos os serviços em background
+# Comandos:
+#   docker-compose up -d          → sobe o Kafka em background
 #   docker-compose down           → para e remove os containers
 #   docker-compose logs -f kafka  → acompanha os logs do Kafka
-#   docker-compose ps             → vê o status de cada serviço
+#   docker-compose ps             → verifica o status dos containers
 #
-# Comandos úteis após subir:
-#   Ver chaves de idempotência no Redis:
-#     docker exec -it pix-redis redis-cli keys "pix:*"
+# Após subir o Kafka, inicie a aplicação Spring Boot:
+#   mvn spring-boot:run
 #
-#   Listar tópicos do Kafka:
-#     docker exec -it pix-kafka /opt/kafka/bin/kafka-topics.sh \
-#       --bootstrap-server localhost:9092 --list
-#
-#   Ver mensagens do tópico de eventos PIX:
-#     docker exec -it pix-kafka /opt/kafka/bin/kafka-console-consumer.sh \
-#       --bootstrap-server localhost:9092 \
-#       --topic pix.events --from-beginning
+# URLs disponíveis:
+#   http://localhost:8080               → Frontend
+#   http://localhost:8080/swagger-ui.html → Documentação da API
+#   http://localhost:8080/h2-console    → Console do banco (sa / sem senha)
 
 services:
 
-  # ========== PostgreSQL ==========
-  # Banco de dados relacional principal.
-  # Armazena: contas (accounts), transações (transactions) e alertas de anomalia (anomaly_alerts).
-  # O Spring Boot cria as tabelas automaticamente via ddl-auto: update no application.yml.
-  # alpine = variante mínima da imagem, muito menor que a versão padrão (~85 MB)
-  postgres:
-    image: postgres:15-alpine
-    container_name: pix-postgres
-    environment:
-      POSTGRES_DB: pixdb          # nome do banco criado automaticamente na inicialização
-      POSTGRES_USER: pix_user     # usuário — deve bater exatamente com application.yml
-      POSTGRES_PASSWORD: pix_pass # senha  — deve bater exatamente com application.yml
-    ports:
-      # host:container — expõe a porta 5432 do container na porta 5432 da máquina
-      # Permite conexão via DBeaver, pgAdmin ou qualquer client PostgreSQL
-      - "5432:5432"
-    volumes:
-      # Volume nomeado: os dados do banco sobrevivem mesmo se o container for removido e recriado.
-      # Sem isso, todos os dados são perdidos a cada "docker-compose down"
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      # pg_isready verifica se o banco está aceitando conexões
-      test: ["CMD-SHELL", "pg_isready -U pix_user -d pixdb"]
-      interval: 10s   # verifica a cada 10 segundos
-      timeout: 5s     # aguarda no máximo 5 segundos por resposta
-      retries: 5      # após 5 falhas consecutivas, marca como unhealthy
 
-  # ========== Redis ==========
-  # Cache em memória usado para as chaves de idempotência do PIX.
+  # ── Redis — cache de idempotência ───────────────────────────────────────
   #
-  # Como funciona:
-  # Cada PIX enviado gera uma chave no formato: pix:{accountId}:{uuid}
-  # Exemplo: pix:42:550e8400-e29b-41d4-a716-446655440000
-  # Essa chave tem TTL de 24h (configurável em application.yml).
-  # Se a mesma chave chegar duas vezes, o backend retorna o resultado cacheado
-  # sem debitar o saldo novamente — isso é a idempotência.
+  # Armazena as chaves de idempotência com TTL automático de 24h.
+  # Cada chave PIX processada fica no formato:
+  #   "pix:idempotency:{uuid}" → {json com dados da transação}
+  #
+  # Por que Redis e não apenas o banco?
+  # - Lookup em ~0.1ms (vs ~5-20ms com SQL)
+  # - TTL nativo: chaves expiram automaticamente sem jobs de limpeza
+  # - SETNX atômico: lock distribuído sem race conditions
+  # - In-memory: não gera I/O em disco para cada verificação de idempotência
+  #
+  # redis:7-alpine: variante mínima (~30MB) — ideal para desenvolvimento
   redis:
     image: redis:7-alpine
     container_name: pix-redis
     ports:
-      - "6379:6379"   # porta padrão do Redis
+      # A aplicação Spring Boot conecta nesta porta (spring.data.redis.port: 6379)
+      - "6379:6379"
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 128mb
+      --maxmemory-policy allkeys-lru
+    # Configurações:
+    # --appendonly yes: persistência AOF (dados sobrevivem a restart do container)
+    # --appendfsync everysec: flush em disco a cada 1s (equilíbrio performance/durabilidade)
+    # --maxmemory 128mb: limite de memória — evita consumo excessivo em dev
+    # --maxmemory-policy allkeys-lru: quando cheio, remove a chave menos usada recentemente
     volumes:
-      # Persiste os dados em disco usando AOF (Append Only File).
-      # Garante que as chaves de idempotência sobrevivam a um restart do container.
+      # Persiste dados do Redis entre restarts
       - redis_data:/data
-    command: redis-server --appendonly yes  # habilita persistência AOF no disco
     healthcheck:
-      # redis-cli ping retorna PONG se o servidor está respondendo
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
+      start_period: 5s
 
-  # ========== Kafka (Apache oficial, modo KRaft) ==========
-  # Message broker para comunicação assíncrona entre o PIX Module e o Anomaly Detector.
+  # ── Kafka (modo KRaft — sem Zookeeper) ──────────────────────────────────
   #
-  # Fluxo de eventos:
-  # PixService → publica em "pix.events" → PixEventConsumer → AnomalyDetectorService
+  # KRaft é o modo moderno do Kafka (desde v3.x) onde o próprio broker
+  # gerencia metadados sem depender do Zookeeper.
+  # Vantagens: setup mais simples, imagem menor, menos containers.
   #
   # Por que apache/kafka em vez de confluentinc/cp-kafka?
-  # - apache/kafka é a imagem oficial mantida pelo Apache Software Foundation
-  # - Usa KRaft: sem necessidade de Zookeeper (economiza ~438 MB de download)
-  # - Tags estáveis e previsíveis (3.9.0, 3.8.0, etc.)
-  #
-  # Tópicos criados automaticamente pelo Spring Boot ao subir:
-  # - pix.events: publicado após cada PIX concluído (3 partições)
-  # - pix.alerts: publicado quando anomalia é detectada (1 partição)
+  # - apache/kafka: imagem oficial do Apache (~220 MB, sem Zookeeper)
+  # - confluentinc/cp-kafka: requer Zookeeper (~438 MB cada = 876 MB total)
+  # Para desenvolvimento local, a imagem oficial é suficiente.
   kafka:
     image: apache/kafka:3.9.0
     container_name: pix-kafka
     ports:
-      # A aplicação Spring Boot se conecta nessa porta (localhost:9092)
+      # A aplicação Spring Boot conecta nesta porta (bootstrap-servers: localhost:9092)
       - "9092:9092"
     environment:
-      # ---- Identidade do broker ----
-      KAFKA_NODE_ID: 1                            # ID único deste broker no cluster
-      KAFKA_PROCESS_ROLES: broker,controller      # este nó é broker E controller (single-node)
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093  # quorum: só este nó
+      # ── Identidade do nó ────────────────────────────────────────────────
+      KAFKA_NODE_ID: 1
+      # Este nó atua como broker (recebe mensagens) E controller (coordenação KRaft)
+      KAFKA_PROCESS_ROLES: broker,controller
+      # Quorum de controllers: apenas este nó (single-node dev setup)
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
 
-      # ---- Listeners ----
-      # PLAINTEXT: porta 9092 — usada pela aplicação Spring Boot
-      # CONTROLLER: porta 9093 — usada internamente para coordenação KRaft (não exposta)
-      # PLAINTEXT_HOST: mesmo que PLAINTEXT, explicitado para clareza
+      # ── Configuração de listeners ────────────────────────────────────────
+      # PLAINTEXT (9092): usado pela aplicação Spring Boot (externo ao container)
+      # CONTROLLER (9093): coordenação interna KRaft (não exposta externamente)
       KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
 
-      # ---- Comportamento ----
-      # Cria tópicos automaticamente quando a aplicação publica pela primeira vez.
-      # Sem isso precisaria criar pix.events e pix.alerts manualmente.
+      # ── Comportamento ───────────────────────────────────────────────────
+      # Auto-criação de tópicos: o KafkaConfig.java também cria via @Bean,
+      # mas esta configuração serve como fallback
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
 
-      # Fator de replicação 1: adequado para 1 único broker em desenvolvimento.
-      # Em produção com múltiplos brokers, usar 3 para tolerância a falhas.
+      # Para desenvolvimento com 1 broker: fator de replicação = 1
+      # EM PRODUÇÃO: usar 3 brokers com replicação = 3
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
 
-      # Reduz o tempo de retenção de logs para desenvolvimento (padrão é 7 dias)
-      KAFKA_LOG_RETENTION_HOURS: 24
+      # Retenção de logs reduzida para dev (padrão é 7 dias)
+      KAFKA_LOG_RETENTION_HOURS: 1
 
     volumes:
-      # Persiste os dados dos tópicos e offsets dos consumers entre restarts
+      # Persiste dados dos tópicos entre restarts do container
       - kafka_data:/var/lib/kafka/data
 
     healthcheck:
       # Verifica se o broker está respondendo listando os tópicos
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      test: [ "CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1" ]
       interval: 15s
       timeout: 10s
       retries: 10
-      start_period: 30s  # aguarda 30s antes de começar a verificar (Kafka demora para iniciar)
+      # Aguarda 30s antes de começar a verificar (Kafka demora para iniciar)
+      start_period: 30s
 
-# ========== VOLUMES ==========
-# Volumes nomeados gerenciados pelo Docker.
-# Os dados ficam em: C:\Users\<user>\AppData\Local\Docker\wsl\data (Windows)
-# Persistem entre "docker-compose down" e "docker-compose up".
-# Para apagar tudo e começar do zero use: docker-compose down -v
 volumes:
-  postgres_data:
-    driver: local  # armazenamento local na máquina host
   redis_data:
     driver: local
+    # Dados ficam em: ~/.docker/volumes/pix-simulator_redis_data
   kafka_data:
     driver: local
+    # Dados ficam em: ~/.docker/volumes/pix-simulator_kafka_data
+    # Para resetar completamente: docker-compose down -v

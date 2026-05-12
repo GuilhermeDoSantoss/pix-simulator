@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>PIX Simulator</title>
+
+    <!--
+      ╔══════════════════════════════════════════════════════════════════════╗
+      ║  FRONTEND PIX SIMULATOR                                              ║
+      ║  Arquivo: src/main/resources/static/index.html                       ║
+      ║                                                                      ║
+      ║  COMO ESTE ARQUIVO SE CONECTA AO BACKEND:                           ║
+      ║                                                                      ║
+      ║  1. Servido pelo Spring Boot em http://localhost:8080                ║
+      ║     Configurado em WebMvcConfig.java:                                ║
+      ║       addResourceHandlers → "classpath:/static/"                     ║
+      ║       addViewControllers  → "/" redireciona para "/index.html"       ║
+      ║                                                                      ║
+      ║  2. Comunicação via Fetch API (mesmo host, sem CORS):                ║
+      ║     Todas as chamadas usam paths relativos: "/api/..."               ║
+      ║     Ex: fetch('/api/auth/login') → http://localhost:8080/api/auth/login║
+      ║                                                                      ║
+      ║  ENDPOINTS CHAMADOS:                                                 ║
+      ║  ┌─────────────────────────────────────────────────────────────┐    ║
+      ║  │  POST /api/accounts/register → cadastro (sem token)         │    ║
+      ║  │  POST /api/auth/login        → login → retorna JWT          │    ║
+      ║  │  GET  /api/accounts/me       → dados da conta autenticada   │    ║
+      ║  │  POST /api/accounts/me/deposit → depósito de teste          │    ║
+      ║  │  POST /api/pix/send          → enviar PIX (com UUID v4)     │    ║
+      ║  │  GET  /api/pix/history       → histórico de transações      │    ║
+      ║  │  GET  /api/anomaly/alerts    → alertas de anomalia          │    ║
+      ║  └─────────────────────────────────────────────────────────────┘    ║
+      ║                                                                      ║
+      ║  FLUXO DE IDEMPOTÊNCIA NO FRONTEND:                                  ║
+      ║  1. Ao clicar "Enviar PIX", gera UUID v4 via crypto.randomUUID()    ║
+      ║  2. UUID enviado no campo idempotencyKey do body JSON               ║
+      ║  3. Backend verifica Redis: HIT → retorna cache; MISS → processa    ║
+      ║  4. Botão "Reenviar com mesmo UUID" testa a idempotência            ║
+      ║  5. Resposta com idempotentHit=true indica duplicata detectada      ║
+      ╚══════════════════════════════════════════════════════════════════════╝
+    -->
+
+    <style>
+        /* ── Tokens de design ─────────────────────────────────────────────── */
+        :root {
+          --bg:      #0b0d14;
+          --surface: #12151f;
+          --card:    #191d2a;
+          --border:  #242838;
+          --accent:  #00e5a0;
+          --blue:    #3b7ff5;
+          --amber:   #f5a623;
+          --red:     #f04848;
+          --text:    #e8eaf0;
+          --muted:   #6b7280;
+          --mono:    'JetBrains Mono', monospace;
+          --r:       10px;
+        }
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+          font-family: 'IBM Plex Sans', system-ui, sans-serif;
+          background: var(--bg);
+          color: var(--text);
+          min-height: 100vh;
+          font-size: 14px;
+          line-height: 1.6;
+        }
+
+        /* ── Layout shell ────────────────────────────────────────────────── */
+        .shell { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+
+        /* ── Sidebar ─────────────────────────────────────────────────────── */
+        .sidebar {
+          background: var(--surface);
+          border-right: 1px solid var(--border);
+          padding: 24px 12px;
+          display: flex; flex-direction: column; gap: 2px;
+        }
+        .logo {
+          font-size: 17px; font-weight: 700; letter-spacing: -.5px;
+          color: var(--accent); margin-bottom: 24px; padding: 0 8px;
+          display: flex; align-items: center; gap: 8px;
+        }
+        .nav-btn {
+          background: none; border: none; color: var(--muted);
+          cursor: pointer; padding: 9px 12px; border-radius: var(--r);
+          text-align: left; width: 100%; font-size: 13px; font-weight: 500;
+          transition: all .15s; display: flex; align-items: center; gap: 10px;
+        }
+        .nav-btn:hover  { background: var(--card); color: var(--text); }
+        .nav-btn.active { background: rgba(0,229,160,.1); color: var(--accent); }
+        .sidebar-footer { margin-top: auto; padding-top: 16px; border-top: 1px solid var(--border); }
+        .user-chip {
+          display: flex; align-items: center; gap: 10px;
+          padding: 10px 12px; border-radius: var(--r);
+        }
+        .avatar {
+          width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+          background: linear-gradient(135deg, var(--blue), var(--accent));
+          display: flex; align-items: center; justify-content: center;
+          font-weight: 700; font-size: 13px; color: #000;
+        }
+        .user-name { font-size: 12px; font-weight: 600; }
+        .user-cpf  { font-size: 10px; color: var(--muted); }
+
+        /* ── Main ────────────────────────────────────────────────────────── */
+        .main { padding: 32px; overflow-y: auto; }
+        .page { display: none; } .page.active { display: block; }
+        .page-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+        .page-sub   { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+
+        /* ── Auth screen ─────────────────────────────────────────────────── */
+        .auth-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+        .auth-card {
+          background: var(--surface); border: 1px solid var(--border);
+          border-radius: 16px; padding: 40px; width: 100%; max-width: 400px;
+        }
+        .auth-logo  { text-align: center; margin-bottom: 28px; }
+        .auth-mark  {
+          width: 52px; height: 52px; border-radius: 14px; margin: 0 auto 12px;
+          background: linear-gradient(135deg, var(--blue), var(--accent));
+          display: flex; align-items: center; justify-content: center;
+          font-size: 22px; font-weight: 800; color: #000;
+        }
+        .auth-logo h1 { font-size: 20px; font-weight: 700; }
+        .auth-logo p  { color: var(--muted); font-size: 12px; margin-top: 4px; }
+        .tabs { display: flex; background: var(--card); border-radius: var(--r); padding: 4px; gap: 4px; margin-bottom: 22px; }
+        .tab {
+          flex: 1; padding: 8px; border: none; border-radius: 6px;
+          background: transparent; color: var(--muted);
+          cursor: pointer; font-size: 13px; font-weight: 500; transition: all .15s;
+        }
+        .tab.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+
+        /* ── Form elements ───────────────────────────────────────────────── */
+        .form-group { margin-bottom: 14px; }
+        .form-group label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); margin-bottom: 5px; }
+        input[type=text], input[type=password], input[type=number] {
+          width: 100%; padding: 10px 12px;
+          background: var(--card); border: 1px solid var(--border);
+          border-radius: var(--r); color: var(--text); font-size: 14px;
+          outline: none; transition: border-color .15s;
+        }
+        input:focus { border-color: var(--blue); }
+        input::placeholder { color: var(--muted); }
+        .btn {
+          width: 100%; padding: 11px; border: none; border-radius: var(--r);
+          font-size: 14px; font-weight: 600; cursor: pointer;
+          transition: all .15s; margin-top: 6px;
+        }
+        .btn:disabled { opacity: .45; cursor: not-allowed; }
+        .btn-primary { background: var(--blue); color: #fff; }
+        .btn-primary:not(:disabled):hover { background: #2b6fe4; }
+        .btn-pix { background: var(--accent); color: #000; font-size: 15px; padding: 13px; }
+        .btn-pix:not(:disabled):hover { background: #00cc90; }
+        .btn-ghost { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+        .btn-ghost:hover { border-color: #374060; }
+        .btn-retry { background: rgba(245,166,35,.08); color: var(--amber); border: 1px solid rgba(245,166,35,.3); margin-top: 8px; }
+        .btn-link { background: none; border: none; color: var(--blue); cursor: pointer; font-size: 11px; text-decoration: underline; }
+
+        /* ── Messages ────────────────────────────────────────────────────── */
+        .msg { padding: 10px 13px; border-radius: var(--r); font-size: 13px; margin-top: 12px; }
+        .msg.ok   { background: rgba(0,229,160,.08); color: var(--accent); border: 1px solid rgba(0,229,160,.2); }
+        .msg.err  { background: rgba(240,72,72,.08);  color: var(--red);    border: 1px solid rgba(240,72,72,.2); }
+        .msg.warn { background: rgba(245,166,35,.08); color: var(--amber);  border: 1px solid rgba(245,166,35,.2); }
+
+        /* ── Stats ───────────────────────────────────────────────────────── */
+        .stat-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-bottom: 28px; }
+        .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--r); padding: 20px; }
+        .stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); margin-bottom: 6px; }
+        .stat-val { font-size: 26px; font-weight: 700; }
+        .stat-val.green { color: var(--accent); }
+        .stat-val.blue  { color: var(--blue); }
+        .stat-val.amber { color: var(--amber); }
+
+        /* ── PIX form ────────────────────────────────────────────────────── */
+        .card {
+          background: var(--card); border: 1px solid var(--border);
+          border-radius: var(--r); padding: 24px; max-width: 520px;
+        }
+        .idp-box {
+          background: var(--surface); border: 1px solid var(--border);
+          border-left: 3px solid var(--blue);
+          border-radius: var(--r); padding: 12px 14px; margin-bottom: 18px;
+        }
+        .idp-hd { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+        .idp-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--blue); }
+        .idp-key  { font-family: var(--mono); font-size: 10px; color: var(--muted); word-break: break-all; margin-bottom: 3px; }
+        .idp-hint { font-size: 11px; color: var(--muted); }
+
+        /* ── PIX result ──────────────────────────────────────────────────── */
+        .pix-result { margin-top: 14px; padding: 14px; border-radius: var(--r); }
+        .pix-result.ok   { background: rgba(0,229,160,.06); border: 1px solid rgba(0,229,160,.2); }
+        .pix-result.warn { background: rgba(245,166,35,.06); border: 1px solid rgba(245,166,35,.2); }
+        .pix-result.err  { background: rgba(240,72,72,.06);  border: 1px solid rgba(240,72,72,.2); }
+        .res-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.04); }
+        .res-row:last-child { border-bottom: none; }
+        .res-lbl { color: var(--muted); font-size: 12px; }
+        .res-val { font-weight: 600; font-size: 12px; }
+
+        /* ── Transaction list ────────────────────────────────────────────── */
+        .section-hd { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .section-hd h2 { font-size: 15px; font-weight: 600; }
+        .icon-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 15px; padding: 4px 8px; border-radius: 4px; }
+        .icon-btn:hover { background: var(--card); color: var(--text); }
+        .tx-list { display: flex; flex-direction: column; gap: 8px; }
+        .tx-item {
+          display: flex; align-items: center; gap: 12px; padding: 13px;
+          background: var(--card); border: 1px solid var(--border);
+          border-radius: var(--r); transition: border-color .15s;
+        }
+        .tx-item:hover { border-color: #374060; }
+        .tx-dot { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+        .tx-dot.completed { background: rgba(0,229,160,.1); }
+        .tx-dot.failed    { background: rgba(240,72,72,.1); }
+        .tx-dot.pending, .tx-dot.processing, .tx-dot.flagged { background: rgba(245,166,35,.1); }
+        .tx-info { flex: 1; min-width: 0; }
+        .tx-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .tx-key  { font-size: 11px; color: var(--muted); }
+        .tx-date { font-size: 11px; color: var(--muted); margin-top: 1px; }
+        .tx-right { text-align: right; }
+        .tx-amount { font-weight: 700; font-size: 14px; color: var(--red); }
+        .tx-status { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; margin-top: 2px; }
+        .tx-status.completed { color: var(--accent); }
+        .tx-status.failed    { color: var(--red); }
+        .tx-status.pending, .tx-status.processing, .tx-status.flagged { color: var(--amber); }
+
+        /* ── Alerts ──────────────────────────────────────────────────────── */
+        .alert-card { background: rgba(245,166,35,.05); border: 1px solid rgba(245,166,35,.2); border-radius: var(--r); padding: 16px; margin-bottom: 10px; }
+        .alert-hd { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .alert-amt { font-size: 18px; font-weight: 700; color: var(--amber); }
+        .alert-ratio { background: rgba(245,166,35,.15); color: var(--amber); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+        .alert-reason { font-size: 12px; color: var(--muted); margin-bottom: 10px; line-height: 1.5; }
+        .alert-meta { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; }
+        .ameta { background: rgba(255,255,255,.03); border-radius: 6px; padding: 8px; text-align: center; }
+        .ameta-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; }
+        .ameta-val { font-size: 13px; font-weight: 600; margin-top: 2px; }
+
+        /* ── Redis badge ─────────────────────────────────────────────────── */
+        .redis-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(0,229,160,.08); border: 1px solid rgba(0,229,160,.2); color: var(--accent); font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 4px; text-transform: uppercase; letter-spacing: .4px; }
+
+        /* ── Toast ───────────────────────────────────────────────────────── */
+        #toast {
+          position: fixed; bottom: 24px; right: 24px;
+          background: var(--card); border: 1px solid var(--border);
+          border-radius: var(--r); padding: 12px 18px; font-size: 13px; font-weight: 500;
+          box-shadow: 0 8px 24px rgba(0,0,0,.5);
+          transform: translateY(80px); opacity: 0; transition: all .25s;
+          z-index: 9999; max-width: 320px;
+        }
+        #toast.show { transform: translateY(0); opacity: 1; }
+        #toast.ok   { border-left: 3px solid var(--accent); color: var(--accent); }
+        #toast.err  { border-left: 3px solid var(--red);    color: var(--red); }
+        #toast.warn { border-left: 3px solid var(--amber);  color: var(--amber); }
+
+        .empty { text-align: center; color: var(--muted); padding: 40px 20px; font-size: 13px; line-height: 1.8; }
+    </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- TELA DE AUTENTICAÇÃO (oculta após login)                        -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="auth-screen">
+    <div class="auth-wrap">
+        <div class="auth-card">
+            <div class="auth-logo">
+                <div class="auth-mark">₽</div>
+                <h1>PIX Simulator</h1>
+                <p>JWT · Redis Idempotency · Kafka · Anomaly Detection</p>
+            </div>
+
+            <div class="tabs">
+                <button class="tab active" id="tab-login"    onclick="switchAuthTab('login')">Entrar</button>
+                <button class="tab"        id="tab-register" onclick="switchAuthTab('register')">Cadastrar</button>
+            </div>
+
+            <!-- Formulário de login -->
+            <!-- Endpoint: POST /api/auth/login -->
+            <div id="form-login">
+                <div class="form-group">
+                    <label>CPF (11 dígitos)</label>
+                    <input id="l-cpf" type="text" maxlength="11" placeholder="12345678901"
+                           oninput="this.value=this.value.replace(/\D/g,'')">
+                </div>
+                <div class="form-group">
+                    <label>Senha</label>
+                    <input id="l-pwd" type="password" placeholder="Sua senha"
+                           onkeydown="if(event.key==='Enter')doLogin()">
+                </div>
+                <button class="btn btn-primary" id="btn-login" onclick="doLogin()">Entrar</button>
+                <div id="msg-login"></div>
+            </div>
+
+            <!-- Formulário de cadastro -->
+            <!-- Endpoint: POST /api/accounts/register -->
+            <div id="form-register" style="display:none">
+                <div class="form-group">
+                    <label>Nome completo</label>
+                    <input id="r-name" type="text" placeholder="João Silva">
+                </div>
+                <div class="form-group">
+                    <label>CPF (11 dígitos)</label>
+                    <input id="r-cpf" type="text" maxlength="11" placeholder="12345678901"
+                           oninput="this.value=this.value.replace(/\D/g,'')">
+                </div>
+                <div class="form-group">
+                    <label>Senha</label>
+                    <input id="r-pwd" type="password" placeholder="Mínimo 6 caracteres">
+                </div>
+                <div class="form-group">
+                    <label>Chave PIX</label>
+                    <input id="r-pix" type="text" placeholder="email@exemplo.com">
+                </div>
+                <div class="form-group">
+                    <label>Saldo inicial (R$)</label>
+                    <input id="r-bal" type="number" placeholder="1000.00" step="0.01" min="0" value="1000">
+                </div>
+                <button class="btn btn-primary" id="btn-register" onclick="doRegister()">Criar conta</button>
+                <div id="msg-register"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- SHELL DO APP (visível após login)                               -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="app-screen" class="shell" style="display:none">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="logo">
+            <span>◈</span> PIX Simulador
+        </div>
+        <button class="nav-btn active" id="nav-dashboard" onclick="showPage('dashboard')">
+            <span>⊞</span> Dashboard
+        </button>
+        <button class="nav-btn" id="nav-send" onclick="showPage('send')">
+            <span>→</span> Enviar PIX
+        </button>
+        <button class="nav-btn" id="nav-history" onclick="showPage('history')">
+            <span>≡</span> Histórico
+        </button>
+        <button class="nav-btn" id="nav-alerts" onclick="showPage('alerts')">
+            <span>⚑</span> Alertas
+            <span id="alert-badge" style="display:none; margin-left:auto; background:var(--amber);
+        color:#000; border-radius:10px; padding:1px 7px; font-size:10px; font-weight:700;">0</span>
+        </button>
+        <button class="nav-btn" id="nav-deposit" onclick="showPage('deposit')">
+            <span>+</span> Depositar
+        </button>
+
+        <div class="sidebar-footer">
+            <div class="user-chip">
+                <div class="avatar" id="avatar-init">?</div>
+                <div>
+                    <div class="user-name" id="user-name-sidebar">—</div>
+                    <div class="user-cpf"  id="user-cpf-sidebar">—</div>
+                </div>
+            </div>
+            <button class="nav-btn" style="color:var(--red); margin-top:4px" onclick="doLogout()">
+                <span>⏻</span> Sair
+            </button>
+        </div>
+    </aside>
+
+    <!-- Área principal -->
+    <main class="main">
+
+        <!-- ── DASHBOARD ──────────────────────────────────────────── -->
+        <div class="page active" id="page-dashboard">
+            <div class="page-title">Dashboard</div>
+            <div class="page-sub">Bem-vindo, <span id="dash-name">—</span></div>
+            <div class="stat-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Saldo disponível</div>
+                    <div class="stat-val green" id="dash-balance">R$ —</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Transações</div>
+                    <div class="stat-val blue" id="dash-tx-count">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Alertas abertos</div>
+                    <div class="stat-val amber" id="dash-alerts">—</div>
+                </div>
+            </div>
+            <div class="section-hd">
+                <h2>Transações recentes</h2>
+                <button class="icon-btn" onclick="loadDashboard()">↻</button>
+            </div>
+            <div class="tx-list" id="dash-tx-list">
+                <div class="empty">Carregando...</div>
+            </div>
+        </div>
+
+        <!-- ── ENVIAR PIX ──────────────────────────────────────────── -->
+        <!--
+          IDEMPOTÊNCIA COM REDIS:
+          1. Ao clicar "Novo PIX", generateNewKey() cria um UUID v4 via crypto.randomUUID()
+          2. O UUID é exibido no campo "idp-display" e guardado em currentKey
+          3. Ao clicar "Enviar PIX", o UUID é enviado no campo idempotencyKey do body JSON
+          4. O backend verifica Redis:
+             - HIT:  retorna o resultado anterior (idempotentHit=true na resposta)
+             - MISS: processa o PIX e armazena no Redis com TTL de 24h
+          5. Ao clicar "Reenviar com mesmo UUID", envia o mesmo currentKey novamente
+             → deve retornar idempotentHit=true (duplicata detectada pelo Redis)
+        -->
+        <div class="page" id="page-send">
+            <div class="page-title">Enviar PIX</div>
+            <div class="page-sub">Transferências com idempotência garantida via Redis</div>
+            <div class="card">
+                <!-- Bloco de idempotência -->
+                <div class="idp-box">
+                    <div class="idp-hd">
+                        <span class="idp-label">🔑 Chave de Idempotência (UUID v4)</span>
+                        <button class="btn-link" onclick="generateNewKey()">Gerar novo</button>
+                    </div>
+                    <div class="idp-key" id="idp-display">—</div>
+                    <div class="idp-hint">
+                        Mesmo UUID = mesmo resultado. Seguro reenviar em caso de falha de rede.
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Chave PIX do destinatário</label>
+                    <input id="p-pix-key" type="text" placeholder="email@exemplo.com">
+                </div>
+                <div class="form-group">
+                    <label>Valor (R$)</label>
+                    <input id="p-amount" type="number" placeholder="150.00" step="0.01" min="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Descrição (opcional)</label>
+                    <input id="p-desc" type="text" placeholder="Almoço do grupo" maxlength="140">
+                </div>
+
+                <button class="btn btn-pix" id="btn-send-pix" onclick="doSendPix()">
+                    Enviar PIX
+                </button>
+
+                <!--
+                  Botão de teste de idempotência:
+                  Clique após enviar um PIX para reenviar com o MESMO UUID.
+                  A resposta deve ter idempotentHit=true e vir do cache Redis.
+                -->
+                <button class="btn btn-retry" id="btn-retry" style="display:none" onclick="doRetryPix()">
+                    🔁 Reenviar com mesmo UUID — testar idempotência Redis
+                </button>
+
+                <div id="pix-result"></div>
+            </div>
+        </div>
+
+        <!-- ── HISTÓRICO ──────────────────────────────────────────── -->
+        <!-- Endpoint: GET /api/pix/history -->
+        <div class="page" id="page-history">
+            <div class="section-hd">
+                <h2>Histórico de transações</h2>
+                <button class="icon-btn" onclick="loadHistory()">↻</button>
+            </div>
+            <div class="tx-list" id="history-list">
+                <div class="empty">Nenhuma transação ainda</div>
+            </div>
+        </div>
+
+        <!-- ── ALERTAS ────────────────────────────────────────────── -->
+        <!-- Endpoint: GET /api/anomaly/alerts -->
+        <div class="page" id="page-alerts">
+            <div class="section-hd">
+                <h2>Alertas de anomalia</h2>
+                <button class="icon-btn" onclick="loadAlerts()">↻</button>
+            </div>
+            <div style="background:rgba(245,166,35,.06); border:1px solid rgba(245,166,35,.2);
+           border-radius:var(--r); padding:14px; font-size:12px; color:var(--muted);
+           margin-bottom:18px; line-height:1.7">
+                <strong style="color:var(--amber)">Como funciona a detecção:</strong>
+                Após cada PIX, o sistema calcula a razão entre o valor atual e a sua
+                média histórica de 30 dias. Se a razão ultrapassar <strong>10×</strong>,
+                a transação é bloqueada como FLAGGED e um alerta é gerado.
+                São necessárias ao menos 3 transações concluídas para ativar a detecção.
+            </div>
+            <div id="alerts-list"><div class="empty">Nenhum alerta</div></div>
+        </div>
+
+        <!-- ── DEPOSITAR ──────────────────────────────────────────── -->
+        <!-- Endpoint: POST /api/accounts/me/deposit -->
+        <div class="page" id="page-deposit">
+            <div class="page-title">Depositar</div>
+            <div class="page-sub">Adicione fundos à sua conta (auxiliar para testes)</div>
+            <div class="card" style="max-width:380px">
+                <div class="form-group">
+                    <label>Valor (R$)</label>
+                    <input id="dep-amount" type="number" placeholder="500.00" step="0.01" min="0.01">
+                </div>
+                <button class="btn btn-primary" onclick="doDeposit()">Depositar</button>
+                <div id="msg-deposit"></div>
+            </div>
+        </div>
+
+    </main>
+</div>
+
+<div id="toast"></div>
+
+<script>
+    // ════════════════════════════════════════════════════════════════════
+    // CONFIGURAÇÃO DA API
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * Base URL da API.
+     * Como o frontend é servido pelo próprio Spring Boot (mesmo host/porta),
+     * usamos paths relativos. Não há problema de CORS.
+     * Em produção com frontend separado, usar URL absoluta: 'https://api.exemplo.com'
+     */
+    const API_BASE = '/api';
+
+    /** Token JWT armazenado em sessionStorage (limpo ao fechar a aba) */
+    let jwtToken   = null;
+    let accountId  = null;
+
+    /** UUID v4 da transação atual — reutilizado para testar idempotência */
+    let currentKey = null;
+
+    /** Último payload enviado — reutilizado pelo botão de retry */
+    let lastPayload = null;
+
+    // ════════════════════════════════════════════════════════════════════
+    // UTILITÁRIOS DE HTTP
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * Wrapper Fetch que adiciona automaticamente o header Authorization.
+     *
+     * Todos os requests para /api/* passam por aqui.
+     * O JWT é incluído em todo request após o login.
+     *
+     * @param {string} path    - caminho relativo da API (ex: '/api/pix/send')
+     * @param {object} options - opções do fetch (method, body, etc.)
+     * @returns {object}       - body JSON da resposta
+     * @throws {Error}         - com mensagem da API em caso de erro HTTP
+     */
+    async function api(path, options = {}) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (jwtToken) {
+        // Header de autenticação JWT — obrigatório em todos os endpoints protegidos
+        headers['Authorization'] = `Bearer ${jwtToken}`;
+      }
+
+      const response = await fetch(API_BASE + path, { ...options, headers });
+      const body = await response.json();
+
+      if (!response.ok) {
+        // Extrai mensagem de erro da resposta padronizada ApiResponse
+        if (body.data && typeof body.data === 'object') {
+          // Erros de validação: {campo: mensagem}
+          throw new Error(Object.values(body.data).join(' | '));
+        }
+        throw new Error(body.message || `Erro HTTP ${response.status}`);
+      }
+
+      return body;
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // IDEMPOTÊNCIA — GERAÇÃO DE UUID v4
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * Gera um UUID v4 para a chave de idempotência.
+     *
+     * Usa crypto.randomUUID() que é o método nativo do browser para UUID v4.
+     * Fallback manual para browsers sem suporte (raro em 2024).
+     *
+     * Por que UUID v4?
+     * - 122 bits de aleatoriedade → probabilidade de colisão ≈ zero
+     * - Não expõe informação de máquina ou tempo (seguro)
+     * - Formato padrão reconhecido pelo backend (validado com regex no servidor)
+     *
+     * @returns {string} UUID v4 no formato xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+     */
+    function generateUuidV4() {
+      if (crypto?.randomUUID) {
+        return crypto.randomUUID(); // Nativo do browser — garantido v4
+      }
+      // Fallback manual respeitando o RFC 4122
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+      });
+    }
+
+    /**
+     * Gera novo UUID v4 e atualiza a interface.
+     * Chamado ao carregar a página e ao clicar em "Gerar novo".
+     * Resetar a chave significa que o próximo PIX é uma nova operação.
+     */
+    function generateNewKey() {
+      currentKey = generateUuidV4();
+      const display = document.getElementById('idp-display');
+      if (display) display.textContent = currentKey;
+
+      // Esconde o botão de retry e limpa o resultado anterior
+      const retryBtn = document.getElementById('btn-retry');
+      if (retryBtn) retryBtn.style.display = 'none';
+      const result = document.getElementById('pix-result');
+      if (result) result.innerHTML = '';
+      lastPayload = null;
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // AUTENTICAÇÃO
+    // ════════════════════════════════════════════════════════════════════
+
+    function switchAuthTab(tab) {
+      document.getElementById('form-login').style.display    = tab === 'login'    ? 'block' : 'none';
+      document.getElementById('form-register').style.display = tab === 'register' ? 'block' : 'none';
+      document.getElementById('tab-login').classList.toggle('active',    tab === 'login');
+      document.getElementById('tab-register').classList.toggle('active', tab === 'register');
+    }
+
+    /**
+     * Login — POST /api/auth/login
+     *
+     * Envia CPF + senha. Recebe o JWT no campo data.token.
+     * O JWT é armazenado em sessionStorage para persistir entre páginas
+     * mas ser limpo ao fechar a aba (mais seguro que localStorage).
+     */
+    async function doLogin() {
+      const cpf      = document.getElementById('l-cpf').value.trim();
+      const password = document.getElementById('l-pwd').value;
+      setBtn('btn-login', 'Entrando…', true);
+
+      try {
+        const res = await api('/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ cpf, password })
+        });
+
+        // Armazena JWT e dados da sessão
+        jwtToken  = res.data.token;
+        accountId = res.data.accountId;
+        sessionStorage.setItem('pix_token', jwtToken);
+        sessionStorage.setItem('pix_aid', String(accountId));
+
+        enterApp(res.data.name, cpf);
+      } catch (err) {
+        showMsg('msg-login', err.message, 'err');
+      } finally {
+        setBtn('btn-login', 'Entrar');
+      }
+    }
+
+    /**
+     * Cadastro — POST /api/accounts/register
+     *
+     * Endpoint público (sem JWT). Cria conta e redireciona para login.
+     */
+    async function doRegister() {
+      setBtn('btn-register', 'Criando…', true);
+      try {
+        await api('/accounts/register', {
+          method: 'POST',
+          body: JSON.stringify({
+            name:           document.getElementById('r-name').value.trim(),
+            cpf:            document.getElementById('r-cpf').value.trim(),
+            password:       document.getElementById('r-pwd').value,
+            pixKey:         document.getElementById('r-pix').value.trim(),
+            initialBalance: parseFloat(document.getElementById('r-bal').value) || 0
+          })
+        });
+        showMsg('msg-register', 'Conta criada! Faça seu login.', 'ok');
+        setTimeout(() => switchAuthTab('login'), 1500);
+      } catch (err) {
+        showMsg('msg-register', err.message, 'err');
+      } finally {
+        setBtn('btn-register', 'Criar conta');
+      }
+    }
+
+    function doLogout() {
+      jwtToken = accountId = null;
+      sessionStorage.clear();
+      document.getElementById('app-screen').style.display = 'none';
+      document.getElementById('auth-screen').style.display = 'block';
+      document.getElementById('l-cpf').value = '';
+      document.getElementById('l-pwd').value = '';
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // SHELL DO APP
+    // ════════════════════════════════════════════════════════════════════
+
+    function enterApp(name, cpf) {
+      document.getElementById('auth-screen').style.display = 'none';
+      document.getElementById('app-screen').style.display = 'grid';
+      document.getElementById('dash-name').textContent = name;
+      document.getElementById('user-name-sidebar').textContent = name;
+      document.getElementById('user-cpf-sidebar').textContent  = cpf || '—';
+      document.getElementById('avatar-init').textContent = name.charAt(0).toUpperCase();
+      generateNewKey();
+      loadDashboard();
+    }
+
+    function showPage(id) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('page-' + id).classList.add('active');
+      document.getElementById('nav-'  + id).classList.add('active');
+      if (id === 'history')   loadHistory();
+      if (id === 'alerts')    loadAlerts();
+      if (id === 'dashboard') loadDashboard();
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // ENVIO DE PIX COM IDEMPOTÊNCIA
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * Envia um PIX — POST /api/pix/send
+     *
+     * FLUXO DE IDEMPOTÊNCIA:
+     * 1. O UUID v4 em currentKey é incluído no campo idempotencyKey
+     * 2. Backend verifica Redis:
+     *    - Se existe → retorna resultado anterior (sem processar novamente)
+     *    - Se não existe → processa, salva no Redis com TTL 24h, retorna PENDING
+     * 3. idempotentHit=true na resposta indica que veio do cache Redis
+     *
+     * Após o primeiro envio, o botão "Reenviar com mesmo UUID" aparece
+     * para permitir testar a idempotência manualmente.
+     */
+    async function doSendPix() {
+      const receiverPixKey = document.getElementById('p-pix-key').value.trim();
+      const amount         = parseFloat(document.getElementById('p-amount').value);
+      const description    = document.getElementById('p-desc').value.trim();
+
+      if (!receiverPixKey) { toast('Informe a chave PIX do destinatário', 'err'); return; }
+      if (!amount || amount <= 0) { toast('Informe um valor válido', 'err'); return; }
+
+      // Monta o payload com o UUID v4 atual como chave de idempotência
+      lastPayload = {
+        idempotencyKey: currentKey,   // UUID v4 gerado pelo frontend
+        receiverPixKey,
+        amount,
+        description: description || null
+      };
+
+      await executePix(lastPayload);
+    }
+
+    /**
+     * Reenviar com o mesmo UUID — testa idempotência Redis.
+     *
+     * Ao clicar neste botão, exatamente o mesmo payload é reenviado.
+     * O backend deve:
+     * 1. Validar UUID v4 (continua válido)
+     * 2. Verificar Redis → HIT (chave armazenada no primeiro envio)
+     * 3. Retornar a resposta original com idempotentHit=true
+     *
+     * Sem Redis, isso consultaria o banco H2 (fallback).
+     * Com Redis, a resposta vem do cache em ~0.1ms.
+     */
+    async function doRetryPix() {
+      if (!lastPayload) return;
+      await executePix(lastPayload);
+    }
+
+    async function executePix(payload) {
+      setBtn('btn-send-pix', 'Processando…', true);
+
+      try {
+        // POST /api/pix/send com idempotencyKey no body
+        const res = await api('/pix/send', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+
+        renderPixResult(res.data);
+
+        if (!res.data.idempotentHit) {
+          // Primeiro envio: mostra botão de retry para testar idempotência
+          document.getElementById('btn-retry').style.display = 'block';
+          refreshBalance();
+          loadHistory();
+          // Aguarda processamento async pelo consumer Kafka antes de checar alertas
+          setTimeout(loadAlerts, 2500);
+        }
+      } catch (err) {
+        renderPixError(err.message);
+      } finally {
+        setBtn('btn-send-pix', 'Enviar PIX');
+      }
+    }
+
+    /**
+     * Renderiza o resultado do PIX na interface.
+     *
+     * idempotentHit=true → resultado veio do cache Redis (destaque visual diferente)
+     * idempotentHit=false → transação nova processada normalmente
+     */
+    function renderPixResult(pix) {
+      const el = document.getElementById('pix-result');
+      const isHit = pix.idempotentHit;
+
+      el.className = `pix-result ${isHit ? 'warn' : 'ok'}`;
+      el.innerHTML = `
+        <div style="font-weight:700; font-size:13px; margin-bottom:10px;
+             color:${isHit ? 'var(--amber)' : 'var(--accent)'}">
+          ${isHit
+            ? '🔁 Cache hit Redis — resultado original retornado'
+            : '✅ PIX enviado com sucesso'}
+        </div>
+        ${isHit ? `
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            <span class="redis-badge">● Redis Cache</span>
+            <span style="font-size:11px;color:var(--muted)">
+              Duplicata detectada. Nenhum saldo foi movido novamente.
+            </span>
+          </div>` : ''}
+        <div class="res-row"><span class="res-lbl">Destinatário</span><span class="res-val">${esc(pix.receiverName)}</span></div>
+        <div class="res-row"><span class="res-lbl">Chave PIX</span><span class="res-val">${esc(pix.receiverPixKey)}</span></div>
+        <div class="res-row"><span class="res-lbl">Valor</span>
+          <span class="res-val" style="color:${isHit ? 'var(--amber)' : 'var(--accent)'}">
+            ${brl(pix.amount)}
+          </span>
+        </div>
+        <div class="res-row"><span class="res-lbl">Status</span><span class="res-val">${pix.status}</span></div>
+        <div class="res-row"><span class="res-lbl">ID</span><span class="res-val">#${pix.transactionId}</span></div>
+        <div class="res-row">
+          <span class="res-lbl">UUID</span>
+          <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">${pix.idempotencyKey}</span>
+        </div>
+      `;
+    }
+
+    function renderPixError(msg) {
+      const el = document.getElementById('pix-result');
+      el.className = 'pix-result err';
+      el.innerHTML = `<div style="color:var(--red);font-weight:600">❌ ${esc(msg)}</div>`;
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // DASHBOARD — GET /api/accounts/me + /api/pix/history + /api/anomaly/alerts
+    // ════════════════════════════════════════════════════════════════════
+
+    async function loadDashboard() {
+      await Promise.all([refreshBalance(), loadHistory(), loadAlerts()]);
+    }
+
+    /**
+     * Atualiza saldo — GET /api/accounts/me
+     * Requer JWT no header Authorization.
+     */
+    async function refreshBalance() {
+      try {
+        const res = await api('/accounts/me');
+        document.getElementById('dash-balance').textContent = brl(res.data.balance);
+        document.getElementById('user-cpf-sidebar').textContent = res.data.cpf;
+      } catch (err) {
+        console.error('[balance]', err.message);
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // DEPÓSITO — POST /api/accounts/me/deposit
+    // ════════════════════════════════════════════════════════════════════
+    async function doDeposit() {
+      const amount = parseFloat(document.getElementById('dep-amount').value);
+      if (!amount || amount <= 0) { toast('Informe um valor válido', 'err'); return; }
+
+      try {
+        await api('/accounts/me/deposit', {
+          method: 'POST',
+          body: JSON.stringify({ amount })
+        });
+        document.getElementById('dep-amount').value = '';
+        await refreshBalance();
+        toast(`${brl(amount)} depositado com sucesso`, 'ok');
+      } catch (err) {
+        toast(err.message, 'err');
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // HISTÓRICO — GET /api/pix/history
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * Carrega histórico de transações e atualiza dashboard + histórico.
+     * Endpoint: GET /api/pix/history (requer JWT)
+     */
+    async function loadHistory() {
+      try {
+        const res = await api('/pix/history');
+        const list = res.data || [];
+
+        const STATUS_ICON = {
+          COMPLETED: '✅', FAILED: '❌',
+          PENDING: '⏳', PROCESSING: '🔄', FLAGGED: '⚠️'
+        };
+
+        const html = !list.length
+          ? '<div class="empty">Nenhuma transação ainda</div>'
+          : list.slice(0, 20).map(tx => `
+              <div class="tx-item">
+                <div class="tx-dot ${tx.status.toLowerCase()}">${STATUS_ICON[tx.status] || '❓'}</div>
+                <div class="tx-info">
+                  <div class="tx-name">${esc(tx.receiverName || 'Destinatário')}</div>
+                  <div class="tx-key">${esc(tx.receiverPixKey)}</div>
+                  ${tx.description ? `<div class="tx-date">${esc(tx.description)}</div>` : ''}
+                  <div class="tx-date">${formatDate(tx.createdAt)}</div>
+                </div>
+                <div class="tx-right">
+                  <div class="tx-amount">− ${brl(tx.amount)}</div>
+                  <div class="tx-status ${tx.status.toLowerCase()}">${tx.status}</div>
+                </div>
+              </div>`).join('');
+
+        ['dash-tx-list', 'history-list'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.innerHTML = html;
+        });
+
+        document.getElementById('dash-tx-count').textContent = list.length;
+      } catch (err) {
+        console.error('[history]', err.message);
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // ALERTAS — GET /api/anomaly/alerts
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * Carrega alertas de anomalia.
+     * Endpoint: GET /api/anomaly/alerts (requer JWT)
+     * Retorna AnomalyAlertDTO[] com dados de transações suspeitas.
+     */
+    async function loadAlerts() {
+      try {
+        const res = await api('/anomaly/alerts');
+        const alerts = res.data || [];
+
+        const openCount = alerts.filter(a => a.status === 'OPEN').length;
+        document.getElementById('dash-alerts').textContent = openCount;
+
+        const badge = document.getElementById('alert-badge');
+        badge.textContent     = openCount;
+        badge.style.display   = openCount > 0 ? 'inline-block' : 'none';
+
+        const el = document.getElementById('alerts-list');
+        if (!alerts.length) {
+          el.innerHTML = `<div class="empty">
+            Nenhum alerta ainda.<br><br>
+            Para disparar: faça 3+ PIX pequenos, depois envie um valor 10× maior.
+          </div>`;
+          return;
+        }
+
+        el.innerHTML = alerts.map(a => `
+          <div class="alert-card">
+            <div class="alert-hd">
+              <div class="alert-amt">⚠️ ${brl(a.transactionAmount)}</div>
+              <div class="alert-ratio">${a.ratio}× a média</div>
+            </div>
+            <div class="alert-reason">${esc(a.reason)}</div>
+            <div class="alert-meta">
+              <div class="ameta">
+                <div class="ameta-lbl">Média histórica</div>
+                <div class="ameta-val">${brl(a.historicalAverage)}</div>
+              </div>
+              <div class="ameta">
+                <div class="ameta-lbl">Razão</div>
+                <div class="ameta-val">${a.ratio}×</div>
+              </div>
+              <div class="ameta">
+                <div class="ameta-lbl">Status</div>
+                <div class="ameta-val">${a.status}</div>
+              </div>
+            </div>
+            <div style="font-size:10px;color:var(--muted);margin-top:8px">${formatDate(a.createdAt)}</div>
+          </div>`).join('');
+      } catch (err) {
+        console.error('[alerts]', err.message);
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // UTILITÁRIOS UI
+    // ════════════════════════════════════════════════════════════════════
+
+    /** Formata valor como BRL: R$ 1.500,00 */
+    function brl(v) {
+      return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+    }
+
+    /** Formata data/hora no padrão brasileiro */
+    function formatDate(s) {
+      return s ? new Date(s).toLocaleString('pt-BR') : '—';
+    }
+
+    /** Escapa HTML para prevenir XSS */
+    function esc(s) {
+      return String(s || '')
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    /** Mostra mensagem inline */
+    function showMsg(id, msg, type) {
+      const el = document.getElementById(id);
+      el.className = `msg ${type}`;
+      el.textContent = msg;
+      if (type === 'ok') setTimeout(() => { el.textContent = ''; el.className = ''; }, 4000);
+    }
+
+    /** Controla estado do botão */
+    function setBtn(id, html, disabled = false) {
+      const b = document.getElementById(id);
+      b.innerHTML = html;
+      b.disabled = disabled;
+    }
+
+    /** Toast de notificação */
+    let toastTimer;
+    function toast(msg, type = 'ok') {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.className = `show ${type}`;
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { el.className = ''; }, 3500);
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // RESTAURAÇÃO DE SESSÃO
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * Restaura sessão ao recarregar a página.
+     * O JWT fica em sessionStorage — persiste na aba mas limpa ao fechar.
+     * Se o token ainda for válido, entra direto no app sem login.
+     */
+    window.addEventListener('DOMContentLoaded', () => {
+      const savedToken = sessionStorage.getItem('pix_token');
+      const savedId    = sessionStorage.getItem('pix_aid');
+
+      if (savedToken && savedId) {
+        jwtToken  = savedToken;
+        accountId = parseInt(savedId);
+
+        // Valida o token consultando /api/accounts/me
+        api('/accounts/me')
+          .then(res => enterApp(res.data.name, res.data.cpf))
+          .catch(() => {
+            // Token expirado — limpa sessão e mostra tela de login
+            sessionStorage.clear();
+            jwtToken = accountId = null;
+          });
+      }
+    });
+</script>
+</body>
+</html>

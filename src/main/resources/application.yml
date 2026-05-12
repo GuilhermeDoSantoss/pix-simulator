@@ -1,0 +1,131 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: pix-simulador
+
+  # Banco de dados H2 (in-memory)
+  # Nao requer PostgreSQL nem container Docker para o banco.
+  # O schema é criado automaticamente pelo Hibernate ao iniciar.
+  # Console disponivel em: http://localhost:8080/h2-console
+  # JDBC URL no console: jdbc:h2:mem:pixdb
+  datasource:
+    url: jdbc:h2:mem:pixdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;NON_KEYWORDS=VALUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: "1234"
+
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+  # Redis camada de idempotencia
+  # Requer Redis rodando via Docker antes de iniciar a aplicacao.
+  # Adicionado ao docker-compose.yml junto com o Kafka.
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      # Em producao: configurar senha via variavel de ambiente
+      # password: ${REDIS_PASSWORD}
+      timeout: 2000ms  # timeout de conexao (2s ? falha rapida se Redis indisponivel)
+      lettuce:
+        pool:
+          max-active: 8   # maximo de conexoes ativas
+          max-idle: 4     # maximo de conexoes ociosas no pool
+          min-idle: 1     # minimo de conexoes sempre abertas
+
+
+  jpa:
+    hibernate:
+      # create-drop: recria o schema a cada inicializacao (ideal para demos e testes)
+      # Em producao: usar 'validate' ou gerenciar migrations com Flyway/Liquibase
+      ddl-auto: create-drop
+    show-sql: false
+    open-in-view: false  # Desativa OSIV ? evita LazyInitializationException silenciosa
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+        format_sql: false
+
+  # Kafka
+  # Requer Kafka rodando via Docker antes de iniciar a aplicacao.
+  # Comando: docker-compose up -d
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      # acks=all: aguarda confirmacao de todos os brokers (mais seguro, levemente mais lento)
+      acks: all
+      # Retentativas autom�ticas em caso de falha transit�ria de rede
+      retries: 3
+      properties:
+        # Garante que mensagens com a mesma chave cheguem na ordem de envio
+        enable.idempotence: true
+    consumer:
+      group-id: pix-group
+      # earliest: come�a a ler do in�cio do t�pico (�til para reprocessamento)
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        # Lista de pacotes cujas classes podem ser deserializadas (seguran�a)
+        spring.json.trusted.packages: "com.pix.*"
+        # Desabilita mapeamento de tipo do header ? usa a classe configurada
+        spring.json.use.type.headers: false
+
+# ?? JWT ??????????????????????????????????????????????????????????????????
+# Segredo m�nimo de 256 bits para o algoritmo HS256.
+# EM PRODUCAO: usar variavel de ambiente, NUNCA commitar segredos no codigo.
+# Exemplo: app.jwt.secret=${JWT_SECRET}
+app:
+  jwt:
+    secret: "pix-simulator-super-secret-key-must-be-at-least-256-bits-long-here"
+    expiration: 86400000  # 24 horas em milissegundos
+
+
+  # Idempot�ncia Redis
+  idempotency:
+    # TTL da chave de idempot�ncia no Redis (em horas)
+    # Ap�s este per�odo, a chave expira e o mesmo UUID pode ser reutilizado
+    ttl-hours: 24
+    # TTL do lock distribu�do (em segundos)
+    # Protecao contra lock eterno se a aplica��o crashar durante o processamento
+    lock-seconds: 30
+
+  # Deteccao de anomalias
+  anomaly:
+    # Uma transacao e FLAGGED se: valor_atual > media_30_dias * multiplier
+    # Padrao: qualquer PIX mais de 10 acima da media historica e suspeito
+    threshold-multiplier: 10.0
+    # Minimo de transacoes COMPLETED para calcular media significativa
+    # Se historico insuficiente, a verificacao e ignorada (sem baseline)
+    min-history-count: 3
+
+  # Nomes dos topicos Kafka
+  kafka:
+    topics:
+      pix-created: pix.created      # publicado apos aceitar o PIX (PENDING criado)
+      pix-completed: pix.completed  # publicado apos processar com sucesso (COMPLETED)
+      pix-alert: pix.alert          # publicado quando anomalia e detectada
+
+# Swagger / OpenAPI
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  # N�o redireciona / para /swagger-ui.html (o frontend j� faz isso)
+  swagger-ui.disable-swagger-default-url: true
+
+# Logging
+logging:
+  level:
+    com.pix: INFO
+    org.springframework.kafka: WARN
+    org.hibernate.SQL: WARN
